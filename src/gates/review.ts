@@ -194,12 +194,11 @@ export class ReviewGateExecutor {
     config: ReviewConfig,
     entryPointPath: string
   ): Promise<{ text: string; includedFiles: number; includedBytes: number; truncated: boolean }> {
-    const includeContext = config.include_full_repo || config.include_context;
-    if (!includeContext) {
+    if (!config.include_context) {
       return { text: '', includedFiles: 0, includedBytes: 0, truncated: false };
     }
 
-    const pathFilter = config.include_full_repo ? null : entryPointPath;
+    const pathFilter = entryPointPath;
     const tracked = await this.listFiles('git ls-files', pathFilter);
     const untracked = await this.listFiles('git ls-files --others --exclude-standard', pathFilter);
     const files = Array.from(new Set([...tracked, ...untracked]));

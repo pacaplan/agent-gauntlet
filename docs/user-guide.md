@@ -240,7 +240,6 @@ Review gates are defined by Markdown files with YAML frontmatter.
 - `num_reviews` (number, default: `1`): number of tools to run (chooses the first N available from `cli_preference`)
 - `model` (string, optional): passed through to adapters that support it
 - `include_context` (boolean, default: `false`): include entry-point file contents as extra context
-- `include_full_repo` (boolean, default: `false`): include the entire repo file contents as extra context
 - `parallel` (boolean, default: `true`)
 - `run_in_ci` (boolean, default: `true`)
 - `run_locally` (boolean, default: `true`)
