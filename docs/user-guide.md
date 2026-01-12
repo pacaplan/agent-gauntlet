@@ -80,7 +80,7 @@ Uses diff for a specific commit instead of the default change detection logic. T
 
 #### `--uncommitted`
 
-Uses diff for current uncommitted changes only (both staged and unstaged, plus untracked files). Ignores committed changes.
+Uses diff for current uncommitted changes only (both staged and unstaged, plus untracked files). Ignores committed changes. Git-ignored files (via `.gitignore` or other git exclude files) are excluded from untracked file detection.
 
 ### `agent-gauntlet detect`
 
@@ -96,7 +96,7 @@ Uses diff for a specific commit instead of the default change detection logic.
 
 #### `--uncommitted`
 
-Uses diff for current uncommitted changes only (both staged and unstaged, plus untracked files).
+Uses diff for current uncommitted changes only (both staged and unstaged, plus untracked files). Git-ignored files (via `.gitignore` or other git exclude files) are excluded from untracked file detection.
 
 ### `agent-gauntlet list`
 
