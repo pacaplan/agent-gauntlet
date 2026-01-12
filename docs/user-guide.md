@@ -74,6 +74,30 @@ Runs applicable gates for detected changes.
 
 Filters to a single gate name (check or review). If multiple entry points would run the same gate, it runs for each matching entry point.
 
+#### `--commit <sha>`
+
+Uses diff for a specific commit instead of the default change detection logic. The diff is computed as `commit^..commit`.
+
+#### `--uncommitted`
+
+Uses diff for current uncommitted changes only (both staged and unstaged, plus untracked files). Ignores committed changes.
+
+### `agent-gauntlet detect`
+
+Shows what gates would run for detected changes without actually executing them.
+
+- Detects changed files using the same logic as `run`
+- Expands entry points that match those changes
+- Lists all gates that would run, grouped by entry point
+
+#### `--commit <sha>`
+
+Uses diff for a specific commit instead of the default change detection logic.
+
+#### `--uncommitted`
+
+Uses diff for current uncommitted changes only (both staged and unstaged, plus untracked files).
+
 ### `agent-gauntlet list`
 
 Prints:
@@ -167,13 +191,7 @@ The branch/ref to diff against in local runs.
 
 Directory where job logs are written.
 
-### `fail_fast` (boolean, default: `false`)
-
-If `true`, the runner stops starting new work after the first `fail` or `error`.
-
-Note: parallel jobs may already be running when the first failure occurs.
-
-### `parallel` (boolean, default: `true`)
+### `allow_parallel` (boolean, default: `true`)
 
 Controls scheduling mode:
 - `true`: gates with `parallel: true` run concurrently; `parallel: false` run sequentially (but concurrently with the parallel batch)
@@ -202,7 +220,7 @@ Fields:
 - `run_in_ci` (boolean, default: `true`)
 - `run_locally` (boolean, default: `true`)
 - `timeout` (number seconds, optional)
-- `fail_fast` (boolean, optional): Overrides / complements project-level `fail_fast`
+- `fail_fast` (boolean, optional): If `true`, stops running other checks or reviews after this check fails. Can only be used when `parallel` is `false`.
 
 Behavior:
 - Passes when the command exits `0`
@@ -227,7 +245,6 @@ Review gates are defined by Markdown files with YAML frontmatter.
 - `run_in_ci` (boolean, default: `true`)
 - `run_locally` (boolean, default: `true`)
 - `timeout` (number seconds, optional)
-- `fail_fast` (boolean, optional)
 
 ### Pass/fail detection
 

@@ -9,7 +9,18 @@ export const checkGateSchema = z.object({
   run_locally: z.boolean().default(true),
   timeout: z.number().optional(),
   fail_fast: z.boolean().optional(),
-});
+}).refine(
+  (data) => {
+    // fail_fast can only be used when parallel is false
+    if (data.fail_fast === true && data.parallel === true) {
+      return false;
+    }
+    return true;
+  },
+  {
+    message: "fail_fast can only be used when parallel is false",
+  }
+);
 
 export const reviewGateSchema = z.object({
   name: z.string(),
@@ -22,7 +33,6 @@ export const reviewGateSchema = z.object({
   run_in_ci: z.boolean().default(true),
   run_locally: z.boolean().default(true),
   timeout: z.number().optional(),
-  fail_fast: z.boolean().optional(),
 });
 
 export const reviewPromptFrontmatterSchema = z.object({
@@ -38,7 +48,6 @@ export const reviewPromptFrontmatterSchema = z.object({
   run_in_ci: z.boolean().default(true),
   run_locally: z.boolean().default(true),
   timeout: z.number().optional(),
-  fail_fast: z.boolean().optional(),
 });
 
 export const entryPointSchema = z.object({
@@ -50,7 +59,6 @@ export const entryPointSchema = z.object({
 export const gauntletConfigSchema = z.object({
   base_branch: z.string().default('origin/main'),
   log_dir: z.string().default('.gauntlet_logs'),
-  fail_fast: z.boolean().default(false),
-  parallel: z.boolean().default(true),
+  allow_parallel: z.boolean().default(true),
   entry_points: z.array(entryPointSchema),
 });

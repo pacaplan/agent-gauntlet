@@ -76,4 +76,34 @@ Check for vulnerabilities.
     expect(config.reviews['security'].pass_pattern).toBe('SECURE');
     expect(config.reviews['security'].promptContent).toContain('Check for vulnerabilities.');
   });
+
+  it('should reject check gate with fail_fast when parallel is true', async () => {
+    await fs.writeFile(path.join(CHECKS_DIR, 'invalid.yml'), `
+name: invalid
+command: echo test
+parallel: true
+fail_fast: true
+`);
+
+    await expect(loadConfig(TEST_DIR)).rejects.toThrow(/fail_fast can only be used when parallel is false/);
+  });
+
+  it('should accept check gate with fail_fast when parallel is false', async () => {
+    // Clean up the invalid file first
+    try {
+      await fs.unlink(path.join(CHECKS_DIR, 'invalid.yml'));
+    } catch {}
+
+    await fs.writeFile(path.join(CHECKS_DIR, 'valid.yml'), `
+name: valid
+command: echo test
+parallel: false
+fail_fast: true
+`);
+
+    const config = await loadConfig(TEST_DIR);
+    expect(config.checks['valid']).toBeDefined();
+    expect(config.checks['valid'].fail_fast).toBe(true);
+    expect(config.checks['valid'].parallel).toBe(false);
+  });
 });

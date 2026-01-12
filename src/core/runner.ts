@@ -32,7 +32,7 @@ export class Runner {
     const { runnableJobs, preflightResults } = await this.preflight(jobs);
     this.results.push(...preflightResults);
 
-    const parallelEnabled = this.config.project.parallel;
+    const parallelEnabled = this.config.project.allow_parallel;
     const parallelJobs = parallelEnabled ? runnableJobs.filter(j => j.gateConfig.parallel) : [];
     const sequentialJobs = parallelEnabled ? runnableJobs.filter(j => !j.gateConfig.parallel) : runnableJobs;
 
@@ -88,11 +88,9 @@ export class Runner {
     this.results.push(result);
     this.reporter.onJobComplete(job, result);
 
-    // Handle Fail Fast
-    const globalFailFast = this.config.project.fail_fast;
-    const gateFailFast = job.gateConfig.fail_fast;
-
-    if (result.status !== 'pass' && (globalFailFast || gateFailFast)) {
+    // Handle Fail Fast (only for checks, and only when parallel is false)
+    // fail_fast can only be set on checks when parallel is false (enforced by schema)
+    if (result.status !== 'pass' && job.type === 'check' && job.gateConfig.fail_fast) {
       this.shouldStop = true;
     }
   }
@@ -208,6 +206,7 @@ export class Runner {
   }
 
   private shouldFailFast(job: Job): boolean {
-    return Boolean(this.config.project.fail_fast || job.gateConfig.fail_fast);
+    // Only checks can have fail_fast, and only when parallel is false
+    return Boolean(job.type === 'check' && job.gateConfig.fail_fast);
   }
 }

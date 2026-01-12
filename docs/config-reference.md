@@ -17,22 +17,27 @@ This document lists the configuration files Agent Gauntlet loads and all support
 
 ### Schema
 
-- **base_branch**: string (default: `origin/main`)
-- **log_dir**: string (default: `.gauntlet_logs`)
-- **fail_fast**: boolean (default: `false`)
-- **parallel**: boolean (default: `true`)
-- **entry_points**: array (required)
-  - **path**: string (required)
-  - **checks**: string[] (optional; names of gates from `.gauntlet/checks/*.yml`)
-  - **reviews**: string[] (optional; names from `.gauntlet/reviews/*.md` filenames)
+- **base_branch**: string (default: `origin/main`)  
+  The git ref used as the “base” when detecting changes locally (via `git diff base...HEAD`). In CI, the runner prefers GitHub-provided refs (e.g. `GITHUB_BASE_REF`) when available.
+- **log_dir**: string (default: `.gauntlet_logs`)  
+  Directory where per-job logs are written. Each gate run writes a log file named from the job id (sanitized).
+- **allow_parallel**: boolean (default: `true`)  
+  If `true`, gates with `parallel: true` run concurrently, while `parallel: false` gates run sequentially. If `false`, all gates run sequentially regardless of per-gate settings.
+- **entry_points**: array (required)  
+  Declares which parts of the repo are “scopes” for change detection and which gates run for each scope. Only entry points with detected changes will produce jobs.
+  - **path**: string (required)  
+    The scope path for the entry point. Supports fixed paths like `apps/api` and a trailing wildcard form like `packages/*` which expands to one job per changed subdirectory.
+  - **checks**: string[] (optional; names of gates from `.gauntlet/checks/*.yml`)  
+    Which check gate names to run when this entry point is active. Names must match the `name` field inside the corresponding check YAML.
+  - **reviews**: string[] (optional; names from `.gauntlet/reviews/*.md` filenames)  
+    Which review gate names to run when this entry point is active. Names come from review prompt filenames (e.g. `security.md` → `security`).
 
 ### Example
 
 ```yaml
 base_branch: origin/main
 log_dir: .gauntlet_logs
-fail_fast: false
-parallel: true
+allow_parallel: true
 
 entry_points:
   - path: "."
@@ -55,14 +60,22 @@ entry_points:
 
 ### Schema
 
-- **name**: string (required)
-- **command**: string (required)
-- **working_directory**: string (optional; default: entry point path)
-- **parallel**: boolean (default: `false`)
-- **run_in_ci**: boolean (default: `true`)
-- **run_locally**: boolean (default: `true`)
-- **timeout**: number seconds (optional)
-- **fail_fast**: boolean (optional)
+- **name**: string (required)  
+  Unique identifier for this check gate. Entry points reference this name in their `checks` lists.
+- **command**: string (required)  
+  Shell command to execute for the check (e.g. tests, lint, typecheck). The gate passes if the command exits with code `0`.
+- **working_directory**: string (optional; default: entry point path)  
+  Directory to run the command in (`cwd`). If omitted, the command runs in the entry point directory for the job.
+- **parallel**: boolean (default: `false`)  
+  If `true` (and project-level `allow_parallel` is enabled), this gate may run concurrently with other parallel gates. If `false`, it runs in the sequential lane.
+- **run_in_ci**: boolean (default: `true`)  
+  Whether this check gate runs when CI mode is detected (e.g. GitHub Actions). If `false`, the gate is skipped in CI.
+- **run_locally**: boolean (default: `true`)  
+  Whether this check gate runs in local (non-CI) execution. If `false`, the gate is skipped locally.
+- **timeout**: number seconds (optional)  
+  Maximum time allowed for the command; if exceeded, the check is marked as failed due to timeout. Timeouts are enforced per job.
+- **fail_fast**: boolean (optional; can only be used when `parallel` is `false`)  
+  If `true`, a failure/error in this gate stops scheduling subsequent work. Note: the current implementation enforces fail-fast at scheduling time; parallel jobs may already be running.
 
 ### Example
 
@@ -86,19 +99,30 @@ Review gates are defined by Markdown files with YAML frontmatter.
 
 ### Frontmatter schema
 
-- **cli_preference**: string[] (required)
-- **num_reviews**: number (default: `1`)
-- **include_context**: boolean (default: `false`)
-- **include_full_repo**: boolean (default: `false`)
-- **parallel**: boolean (default: `true`)
-- **run_in_ci**: boolean (default: `true`)
-- **run_locally**: boolean (default: `true`)
-- **timeout**: number seconds (optional)
-- **fail_fast**: boolean (optional)
-- **pass_pattern**: string regex (default: `PASS|No issues|No violations|None found`)
-- **fail_pattern**: string regex (optional)
-- **ignore_pattern**: string regex (optional)
-- **model**: string (optional)
+- **cli_preference**: string[] (required)  
+  Ordered list of review CLI tools to try (e.g. `gemini`, `codex`, `claude`). The runner selects the first available tools from this list until `num_reviews` is satisfied.
+- **num_reviews**: number (default: `1`)  
+  How many tools to run for this review gate. If greater than 1, multiple CLIs are executed and the gate fails if any of them fail pass/fail evaluation.
+- **include_context**: boolean (default: `false`)  
+  If `true`, include file contents from the entry point directory as extra context in addition to the diff. Context is size-limited and may be truncated.
+- **include_full_repo**: boolean (default: `false`)  
+  If `true`, include file contents from the entire repository as extra context (overrides `include_context`). This is also size-limited and may be truncated.
+- **parallel**: boolean (default: `true`)  
+  If `true` (and project `allow_parallel` is enabled), this review gate may run concurrently with other parallel gates. If `false`, it runs in the sequential lane.
+- **run_in_ci**: boolean (default: `true`)  
+  Whether this review gate runs when CI mode is detected. If `false`, the review gate is skipped in CI.
+- **run_locally**: boolean (default: `true`)  
+  Whether this review gate runs in local (non-CI) execution. If `false`, the review gate is skipped locally.
+- **timeout**: number seconds (optional)  
+  Maximum time allowed for each CLI execution for this review gate. If exceeded, the job is marked as an error.
+- **pass_pattern**: string regex (default: `PASS|No issues|No violations|None found`)  
+  Regex that must match the CLI output for the review to be considered a pass (unless a failing output is explicitly ignored). Matching is case-insensitive.
+- **fail_pattern**: string regex (optional)  
+  If provided and it matches the output, the review is considered a fail unless `ignore_pattern` also matches. Matching is case-insensitive.
+- **ignore_pattern**: string regex (optional)  
+  If both `fail_pattern` and `ignore_pattern` match the output, the failure is ignored and the review passes. Matching is case-insensitive.
+- **model**: string (optional)  
+  Optional model hint passed to adapters that support it. Adapters that don’t support model selection will ignore this value.
 
 ### Example
 

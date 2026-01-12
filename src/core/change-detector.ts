@@ -3,10 +3,28 @@ import { promisify } from 'node:util';
 
 const execAsync = promisify(exec);
 
+export interface ChangeDetectorOptions {
+  commit?: string; // If provided, get diff for this commit vs its parent
+  uncommitted?: boolean; // If true, only get uncommitted changes (staged + unstaged)
+}
+
 export class ChangeDetector {
-  constructor(private baseBranch: string = 'origin/main') {}
+  constructor(
+    private baseBranch: string = 'origin/main',
+    private options: ChangeDetectorOptions = {}
+  ) {}
 
   async getChangedFiles(): Promise<string[]> {
+    // If commit option is provided, use that
+    if (this.options.commit) {
+      return this.getCommitChangedFiles(this.options.commit);
+    }
+
+    // If uncommitted option is provided, only get uncommitted changes
+    if (this.options.uncommitted) {
+      return this.getUncommittedChangedFiles();
+    }
+
     const isCI = process.env.CI === 'true' || process.env.GITHUB_ACTIONS === 'true';
 
     if (isCI) {
@@ -48,6 +66,37 @@ export class ChangeDetector {
     const files = new Set([
       ...this.parseOutput(committed),
       ...this.parseOutput(uncommitted),
+      ...this.parseOutput(untracked)
+    ]);
+
+    return Array.from(files);
+  }
+
+  private async getCommitChangedFiles(commit: string): Promise<string[]> {
+    // Get diff for commit vs its parent
+    try {
+      const { stdout } = await execAsync(`git diff --name-only ${commit}^..${commit}`);
+      return this.parseOutput(stdout);
+    } catch (error) {
+      // If commit has no parent (initial commit), just get files in that commit
+      try {
+        const { stdout } = await execAsync(`git diff --name-only --root ${commit}`);
+        return this.parseOutput(stdout);
+      } catch {
+        throw new Error(`Failed to get changes for commit ${commit}`);
+      }
+    }
+  }
+
+  private async getUncommittedChangedFiles(): Promise<string[]> {
+    // Get uncommitted changes (staged + unstaged) and untracked files
+    const { stdout: staged } = await execAsync('git diff --name-only --cached');
+    const { stdout: unstaged } = await execAsync('git diff --name-only');
+    const { stdout: untracked } = await execAsync('git ls-files --others --exclude-standard');
+
+    const files = new Set([
+      ...this.parseOutput(staged),
+      ...this.parseOutput(unstaged),
       ...this.parseOutput(untracked)
     ]);
 
