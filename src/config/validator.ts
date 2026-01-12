@@ -245,46 +245,6 @@ export async function validateConfig(rootDir: string = process.cwd()): Promise<V
                 field: 'timeout',
               });
             }
-
-            // Validate regex patterns
-            if (parsedFrontmatter.pass_pattern) {
-              try {
-                new RegExp(parsedFrontmatter.pass_pattern, 'i');
-              } catch {
-                issues.push({
-                  file: filePath,
-                  severity: 'error',
-                  message: 'pass_pattern is not a valid regex',
-                  field: 'pass_pattern',
-                });
-              }
-            }
-
-            if (parsedFrontmatter.fail_pattern) {
-              try {
-                new RegExp(parsedFrontmatter.fail_pattern, 'i');
-              } catch {
-                issues.push({
-                  file: filePath,
-                  severity: 'error',
-                  message: 'fail_pattern is not a valid regex',
-                  field: 'fail_pattern',
-                });
-              }
-            }
-
-            if (parsedFrontmatter.ignore_pattern) {
-              try {
-                new RegExp(parsedFrontmatter.ignore_pattern, 'i');
-              } catch {
-                issues.push({
-                  file: filePath,
-                  severity: 'error',
-                  message: 'ignore_pattern is not a valid regex',
-                  field: 'ignore_pattern',
-                });
-              }
-            }
           } catch (error: any) {
             if (error instanceof ZodError && error.errors && Array.isArray(error.errors)) {
               error.errors.forEach((err: any) => {

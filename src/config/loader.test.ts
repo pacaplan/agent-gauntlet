@@ -39,8 +39,8 @@ working_directory: .
     await fs.writeFile(path.join(REVIEWS_DIR, 'security.md'), `---
 cli_preference:
   - gemini
-pass_pattern: "SECURE"
 ---
+
 # Security Review
 Check for vulnerabilities.
 `);
@@ -73,7 +73,6 @@ Check for vulnerabilities.
     expect(Object.keys(config.reviews)).toContain('security');
     expect(config.reviews['security'].name).toBe('security');
     expect(config.reviews['security'].cli_preference).toEqual(['gemini']);
-    expect(config.reviews['security'].pass_pattern).toBe('SECURE');
     expect(config.reviews['security'].promptContent).toContain('Check for vulnerabilities.');
   });
 

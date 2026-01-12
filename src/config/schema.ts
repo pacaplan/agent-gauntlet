@@ -35,9 +35,6 @@ export const reviewGateSchema = z.object({
 });
 
 export const reviewPromptFrontmatterSchema = z.object({
-  pass_pattern: z.string().default("PASS|No issues|No violations|None found"),
-  fail_pattern: z.string().optional(),
-  ignore_pattern: z.string().optional(),
   model: z.string().optional(),
   cli_preference: z.array(z.string()),
   num_reviews: z.number().default(1),

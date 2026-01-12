@@ -12,6 +12,29 @@ const MAX_CONTEXT_BYTES = 200_000;
 const MAX_FILE_BYTES = 50_000;
 const MAX_BUFFER_BYTES = 10 * 1024 * 1024;
 
+const JSON_SYSTEM_INSTRUCTION = `
+IMPORTANT: You must output ONLY a valid JSON object. Do not output any markdown text, explanations, or code blocks outside of the JSON.
+
+If violations are found:
+{
+  "status": "fail",
+  "violations": [
+    {
+      "file": "path/to/file.rb",
+      "line": 10,
+      "issue": "Description of the violation",
+      "fix": "Suggestion on how to fix it"
+    }
+  ]
+}
+
+If NO violations are found:
+{
+  "status": "pass",
+  "message": "No architecture violations found."
+}
+`;
+
 type ReviewConfig = ReviewGateConfig & ReviewPromptFrontmatter & { promptContent?: string };
 
 export class ReviewGateExecutor {
@@ -52,8 +75,9 @@ export class ReviewGateExecutor {
         );
       }
 
-      const prompt = config.promptContent || '';
-      const outputs: Array<{ adapter: string; status: 'pass' | 'fail'; message: string }> = [];
+      // Always inject JSON instruction
+      const prompt = (config.promptContent || '') + '\n\n' + JSON_SYSTEM_INSTRUCTION;
+      const outputs: Array<{ adapter: string; status: 'pass' | 'fail' | 'error'; message: string }> = [];
 
       for (const adapter of adapters) {
         const output = await adapter.execute({
@@ -65,14 +89,47 @@ export class ReviewGateExecutor {
         });
 
         await logger(`\n--- Review Output (${adapter.name}) ---\n${output}\n`);
-        const evaluation = this.evaluateOutput(output, config);
+        
+        const evaluation = this.evaluateOutput(output);
+        
+        // Log formatted summary for readability
+        if (evaluation.json) {
+            await logger(`\n--- Parsed Result ---\n`);
+            if (evaluation.json.status === 'fail' && Array.isArray(evaluation.json.violations)) {
+                await logger(`Status: FAIL\n`);
+                await logger(`Violations:\n`);
+                // Use for...of loop for async await inside
+                for (const [i, v] of evaluation.json.violations.entries()) {
+                    await logger(`${i+1}. ${v.file}:${v.line || '?'} - ${v.issue}\n`);
+                    if (v.fix) await logger(`   Fix: ${v.fix}\n`);
+                }
+            } else if (evaluation.json.status === 'pass') {
+                await logger(`Status: PASS\n`);
+                if (evaluation.json.message) await logger(`Message: ${evaluation.json.message}\n`);
+            } else {
+                 await logger(`Status: ${evaluation.json.status}\n`);
+                 await logger(`Raw: ${JSON.stringify(evaluation.json, null, 2)}\n`);
+            }
+             await logger(`---------------------\n`);
+        }
+
         outputs.push({ adapter: adapter.name, ...evaluation });
         await logger(`Review result (${adapter.name}): ${evaluation.status} - ${evaluation.message}\n`);
       }
 
       const failed = outputs.find(result => result.status === 'fail');
-      const status = failed ? 'fail' : 'pass';
-      const message = failed ? `Failed (${failed.adapter}): ${failed.message}` : 'Passed';
+      const error = outputs.find(result => result.status === 'error');
+      
+      let status: 'pass' | 'fail' | 'error' = 'pass';
+      let message = 'Passed';
+
+      if (error) {
+        status = 'error';
+        message = `Error (${error.adapter}): ${error.message}`;
+      } else if (failed) {
+        status = 'fail';
+        message = `Failed (${failed.adapter}): ${failed.message}`;
+      }
 
       await logger(`Result: ${status} - ${message}\n`);
 
@@ -171,23 +228,46 @@ export class ReviewGateExecutor {
     }
   }
 
-  private evaluateOutput(output: string, config: ReviewConfig): { status: 'pass' | 'fail'; message: string } {
-    const passPattern = new RegExp(config.pass_pattern || 'PASS|No issues|No violations|None found', 'i');
-    const failPattern = config.fail_pattern ? new RegExp(config.fail_pattern, 'i') : null;
-    const ignorePattern = config.ignore_pattern ? new RegExp(config.ignore_pattern, 'i') : null;
+  public evaluateOutput(output: string): { status: 'pass' | 'fail' | 'error'; message: string; json?: any } {
+    try {
+      // 1. Extract JSON from potential noise
+      // Find the first '{' and last '}'
+      const start = output.indexOf('{');
+      const end = output.lastIndexOf('}');
 
-    if (failPattern && failPattern.test(output)) {
-      if (ignorePattern && ignorePattern.test(output)) {
-        return { status: 'pass', message: 'Passed (ignored failure pattern)' };
+      if (start === -1 || end === -1 || end < start) {
+        return { status: 'error', message: 'No JSON object found in output' };
       }
-      return { status: 'fail', message: 'Failed matching failure pattern' };
-    }
 
-    if (!passPattern.test(output)) {
-      return { status: 'fail', message: 'Output did not match pass pattern' };
-    }
+      let jsonStr = output.substring(start, end + 1);
 
-    return { status: 'pass', message: 'Passed' };
+      // Parse
+      const json = JSON.parse(jsonStr);
+
+      // 3. Validate Schema
+      if (!json.status || (json.status !== 'pass' && json.status !== 'fail')) {
+         return { status: 'error', message: 'Invalid JSON: missing or invalid "status" field', json };
+      }
+
+      if (json.status === 'pass') {
+        return { status: 'pass', message: json.message || 'Passed', json };
+      }
+
+      // json.status === 'fail'
+      const violationCount = Array.isArray(json.violations) ? json.violations.length : 'some';
+      
+      // Construct a summary message
+      let msg = `Found ${violationCount} violations`;
+      if (Array.isArray(json.violations) && json.violations.length > 0) {
+          const first = json.violations[0];
+          msg += `. Example: ${first.issue} in ${first.file}`;
+      }
+      
+      return { status: 'fail', message: msg, json };
+
+    } catch (error: any) {
+      return { status: 'error', message: `Failed to parse JSON output: ${error.message}` };
+    }
   }
 
   private async buildContext(

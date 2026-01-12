@@ -300,7 +300,6 @@ entry_points:
 cli_preference:
   - gemini
   - codex
-pass_pattern: "PASS"
 ---
 
 # Code Review

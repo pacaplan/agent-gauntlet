@@ -113,14 +113,12 @@ Review gates are defined by Markdown files with YAML frontmatter.
   Whether this review gate runs in local (non-CI) execution. If `false`, the review gate is skipped locally.
 - **timeout**: number seconds (optional)  
   Maximum time allowed for each CLI execution for this review gate. If exceeded, the job is marked as an error.
-- **pass_pattern**: string regex (default: `PASS|No issues|No violations|None found`)  
-  Regex that must match the CLI output for the review to be considered a pass (unless a failing output is explicitly ignored). Matching is case-insensitive.
-- **fail_pattern**: string regex (optional)  
-  If provided and it matches the output, the review is considered a fail unless `ignore_pattern` also matches. Matching is case-insensitive.
-- **ignore_pattern**: string regex (optional)  
-  If both `fail_pattern` and `ignore_pattern` match the output, the failure is ignored and the review passes. Matching is case-insensitive.
 - **model**: string (optional)  
   Optional model hint passed to adapters that support it. Adapters that don’t support model selection will ignore this value.
+
+**JSON Output format**
+
+All reviews are automatically instructed to output strict JSON. You do not need to prompt the model for formatting. 
 
 ### Example
 
@@ -132,13 +130,10 @@ cli_preference:
   - claude
 num_reviews: 2
 include_context: true
-pass_pattern: "PASS|No violations"
-fail_pattern: "VIOLATIONS FOUND"
-ignore_pattern: "VIOLATIONS FOUND: 0"
 timeout: 120
 ---
 
 # Code quality review
 
-Review the diff. If there are no issues, end your response with PASS.
+Review the diff for code quality issues. Focus on readability and maintainability.
 ```
