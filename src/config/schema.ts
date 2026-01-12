@@ -27,7 +27,6 @@ export const reviewGateSchema = z.object({
   prompt: z.string(), // Path relative to .gauntlet/reviews/
   cli_preference: z.array(z.string()),
   num_reviews: z.number().default(1),
-  include_context: z.boolean().default(false),
   parallel: z.boolean().default(true),
   run_in_ci: z.boolean().default(true),
   run_locally: z.boolean().default(true),
@@ -38,7 +37,6 @@ export const reviewPromptFrontmatterSchema = z.object({
   model: z.string().optional(),
   cli_preference: z.array(z.string()),
   num_reviews: z.number().default(1),
-  include_context: z.boolean().default(false),
   parallel: z.boolean().default(true),
   run_in_ci: z.boolean().default(true),
   run_locally: z.boolean().default(true),

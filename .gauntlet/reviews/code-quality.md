@@ -4,6 +4,8 @@ cli_preference:
   - gemini
   - claude
 num_reviews: 1
+parallel: true
+
 ---
 
 # Code Review

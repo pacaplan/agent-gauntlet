@@ -1,18 +1,20 @@
 import { exec } from 'node:child_process';
 import { promisify } from 'node:util';
-import fs from 'node:fs/promises';
-import path from 'node:path';
 import { ReviewGateConfig, ReviewPromptFrontmatter } from '../config/types.js';
 import { GateResult } from './result.js';
 import { CLIAdapter, getAdapter } from '../cli-adapters/index.js';
 
 const execAsync = promisify(exec);
 
-const MAX_CONTEXT_BYTES = 200_000;
-const MAX_FILE_BYTES = 50_000;
 const MAX_BUFFER_BYTES = 10 * 1024 * 1024;
 
 const JSON_SYSTEM_INSTRUCTION = `
+You are in a read-only mode. You may read files in the repository to gather context.
+Do NOT attempt to modify files or run shell commands that change system state.
+Do NOT access files outside the repository root.
+Use your available file-reading and search tools to find information.
+If the diff is insufficient or ambiguous, use your tools to read the full file content or related files.
+
 IMPORTANT: You must output ONLY a valid JSON object. Do not output any markdown text, explanations, or code blocks outside of the JSON.
 
 If violations are found:
@@ -67,23 +69,14 @@ export class ReviewGateExecutor {
         };
       }
 
-      const contextResult = await this.buildContext(config, entryPointPath);
-      if (contextResult.text) {
-        const truncated = contextResult.truncated ? ' [truncated]' : '';
-        await logger(
-          `Context included: ${contextResult.includedFiles} files (${contextResult.includedBytes} bytes)${truncated}\n`
-        );
-      }
-
-      // Always inject JSON instruction
-      const prompt = (config.promptContent || '') + '\n\n' + JSON_SYSTEM_INSTRUCTION;
+      // Always inject JSON instruction (which includes dynamic context guidance)
+      const prompt = (config.promptContent || '') + '\n' + JSON_SYSTEM_INSTRUCTION;
       const outputs: Array<{ adapter: string; status: 'pass' | 'fail' | 'error'; message: string }> = [];
 
       for (const adapter of adapters) {
         const output = await adapter.execute({
           prompt,
           diff,
-          context: contextResult.text,
           model: config.model,
           timeoutMs: config.timeout ? config.timeout * 1000 : undefined
         });
@@ -268,72 +261,6 @@ export class ReviewGateExecutor {
     } catch (error: any) {
       return { status: 'error', message: `Failed to parse JSON output: ${error.message}` };
     }
-  }
-
-  private async buildContext(
-    config: ReviewConfig,
-    entryPointPath: string
-  ): Promise<{ text: string; includedFiles: number; includedBytes: number; truncated: boolean }> {
-    if (!config.include_context) {
-      return { text: '', includedFiles: 0, includedBytes: 0, truncated: false };
-    }
-
-    const pathFilter = entryPointPath;
-    const tracked = await this.listFiles('git ls-files', pathFilter);
-    const untracked = await this.listFiles('git ls-files --others --exclude-standard', pathFilter);
-    const files = Array.from(new Set([...tracked, ...untracked]));
-
-    let totalBytes = 0;
-    let truncated = false;
-    let includedFiles = 0;
-    const parts: string[] = [];
-
-    for (const file of files) {
-      if (totalBytes >= MAX_CONTEXT_BYTES) {
-        truncated = true;
-        break;
-      }
-
-      const absolutePath = path.join(process.cwd(), file);
-      let buffer: Buffer;
-
-      try {
-        buffer = await fs.readFile(absolutePath);
-      } catch {
-        continue;
-      }
-
-      if (buffer.includes(0)) {
-        continue;
-      }
-
-      let content = buffer.toString('utf-8');
-      if (content.length > MAX_FILE_BYTES) {
-        content = content.slice(0, MAX_FILE_BYTES);
-        truncated = true;
-      }
-
-      parts.push(`--- FILE: ${file} ---\n${content}\n`);
-      totalBytes += content.length;
-      includedFiles += 1;
-    }
-
-    if (truncated) {
-      parts.push('[Context truncated due to size limits]\n');
-    }
-
-    return {
-      text: parts.join('\n'),
-      includedFiles,
-      includedBytes: totalBytes,
-      truncated
-    };
-  }
-
-  private async listFiles(command: string, pathFilter: string | null): Promise<string[]> {
-    const pathArg = pathFilter ? this.pathArg(pathFilter) : '';
-    const { stdout } = await execAsync(`${command}${pathArg}`, { maxBuffer: MAX_BUFFER_BYTES });
-    return this.parseLines(stdout);
   }
 
   private parseLines(stdout: string): string[] {

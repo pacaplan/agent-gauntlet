@@ -1,7 +1,7 @@
 export interface CLIAdapter {
   name: string;
   isAvailable(): Promise<boolean>;
-  execute(opts: { prompt: string; diff: string; context?: string; model?: string; timeoutMs?: number }): Promise<string>;
+  execute(opts: { prompt: string; diff: string; model?: string; timeoutMs?: number }): Promise<string>;
 }
 
 import { GeminiAdapter } from './gemini.js';

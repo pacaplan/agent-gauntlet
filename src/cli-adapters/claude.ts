@@ -20,18 +20,23 @@ export class ClaudeAdapter implements CLIAdapter {
     }
   }
 
-  async execute(opts: { prompt: string; diff: string; context?: string; model?: string; timeoutMs?: number }): Promise<string> {
-    let fullContent = opts.prompt + "\n\n---" + "-" + "-" + "-" + " DIFF ---" + "\n" + opts.diff;
-    if (opts.context) {
-      fullContent += "\n\n---" + "-" + "-" + "-" + " CONTEXT ---" + "\n" + opts.context;
-    }
+  async execute(opts: { prompt: string; diff: string; model?: string; timeoutMs?: number }): Promise<string> {
+    const fullContent = opts.prompt + "\n\n--- DIFF ---\n" + opts.diff;
 
     const tmpDir = os.tmpdir();
     const tmpFile = path.join(tmpDir, `gauntlet-claude-${Date.now()}.txt`);
     await fs.writeFile(tmpFile, fullContent);
 
+    // Get absolute path to repo root (CWD)
+    const repoRoot = process.cwd();
+
     try {
-      const cmd = `cat "${tmpFile}" | claude -p`;
+      // Recommended invocation per spec:
+      // -p: non-interactive print mode
+      // --cwd: sets working directory to repo root
+      // --allowedTools: explicitly restricts to read-only tools
+      // --max-turns: caps agentic turns
+      const cmd = `cat "${tmpFile}" | claude -p --cwd "${repoRoot}" --allowedTools "Read,Glob,Grep" --max-turns 10`;
       const { stdout } = await execAsync(cmd, { timeout: opts.timeoutMs, maxBuffer: MAX_BUFFER_BYTES });
       return stdout;
     } finally {

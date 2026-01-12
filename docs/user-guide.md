@@ -244,10 +244,9 @@ Review gates are defined by Markdown files with YAML frontmatter.
 
 ### Frontmatter fields
 
-- `cli_preference` (string[], required): ordered list of tools, e.g. `[gemini, codex, claude]`
+- `cli_preference` (string[], required): ordered list of tools, e.g. `[gemini, codex, claude]`. For the full list of tools and how they are used, see [CLI Invocation Details](./cli-invocation-details.md)
 - `num_reviews` (number, default: `1`): number of tools to run (chooses the first N available from `cli_preference`)
 - `model` (string, optional): passed through to adapters that support it
-- `include_context` (boolean, default: `false`): include entry-point file contents as extra context
 - `parallel` (boolean, default: `true`)
 - `run_in_ci` (boolean, default: `true`)
 - `run_locally` (boolean, default: `true`)
@@ -272,16 +271,11 @@ When `num_reviews > 1`:
 - Each tool is evaluated independently
 - If **any** tool fails → the review gate fails
 
-### Diff and context
+### Diff content
 
-For each active entry point, the review receives:
-- a `git diff` scoped to the entry point path
-- optional `context` text constructed from repo files
+For each active entry point, the review receives a `git diff` scoped to the entry point path.
 
-Context behavior (implementation limits):
-- Total context is capped (~200 KB)
-- Each file is capped (~50 KB)
-- Binary files are skipped
+The agent is also granted read-only access to the repository to dynamically fetch additional context if needed.
 
 ## Logs
 

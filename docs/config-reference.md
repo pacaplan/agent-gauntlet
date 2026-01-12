@@ -103,8 +103,6 @@ Review gates are defined by Markdown files with YAML frontmatter.
   Ordered list of review CLI tools to try (e.g. `gemini`, `codex`, `claude`). The runner selects the first available tools from this list until `num_reviews` is satisfied.
 - **num_reviews**: number (default: `1`)  
   How many tools to run for this review gate. If greater than 1, multiple CLIs are executed and the gate fails if any of them fail pass/fail evaluation.
-- **include_context**: boolean (default: `false`)  
-  If `true`, include file contents from the entry point directory as extra context in addition to the diff. Context is size-limited and may be truncated.
 - **parallel**: boolean (default: `true`)  
   If `true` (and project `allow_parallel` is enabled), this review gate may run concurrently with other parallel gates. If `false`, it runs in the sequential lane.
 - **run_in_ci**: boolean (default: `true`)  
@@ -129,7 +127,6 @@ cli_preference:
   - codex
   - claude
 num_reviews: 2
-include_context: true
 timeout: 120
 ---
 

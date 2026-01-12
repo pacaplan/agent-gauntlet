@@ -20,12 +20,9 @@ export class GeminiAdapter implements CLIAdapter {
     }
   }
 
-  async execute(opts: { prompt: string; diff: string; context?: string; model?: string; timeoutMs?: number }): Promise<string> {
+  async execute(opts: { prompt: string; diff: string; model?: string; timeoutMs?: number }): Promise<string> {
     // Construct the full prompt content
-    let fullContent = opts.prompt + "\n\n--- DIFF ---" + opts.diff;
-    if (opts.context) {
-      fullContent += "\n\n--- CONTEXT ---" + opts.context;
-    }
+    const fullContent = opts.prompt + "\n\n--- DIFF ---\n" + opts.diff;
 
     // Write to a temporary file to avoid shell escaping issues
     const tmpDir = os.tmpdir();
@@ -33,13 +30,12 @@ export class GeminiAdapter implements CLIAdapter {
     await fs.writeFile(tmpFile, fullContent);
 
     try {
-      // Assuming 'gemini' accepts input file via cat or direct argument
-      // Using 'cat file | gemini' pattern
-      // If 'model' is provided, we might need a flag. Assuming standard gemini cli doesn't strictly require it or uses env vars.
-      // If the user uses a specific gemini tool, we might need to adjust.
-      // For this prototype, we'll try to pipe it in.
+      // Recommended invocation per spec:
+      // --sandbox: enables the execution sandbox
+      // --allowed-tools: whitelists read-only tools for non-interactive execution
+      // --output-format text: ensures plain text output
       
-      const cmd = `cat "${tmpFile}" | gemini`; 
+      const cmd = `cat "${tmpFile}" | gemini --sandbox --allowed-tools read_file list_directory glob search_file_content --output-format text`; 
       const { stdout } = await execAsync(cmd, { timeout: opts.timeoutMs, maxBuffer: MAX_BUFFER_BYTES });
       return stdout;
     } finally {
