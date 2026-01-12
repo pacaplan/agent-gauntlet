@@ -8,7 +8,8 @@ import { JobGenerator, Job } from './core/job.js';
 import { Runner } from './core/runner.js';
 import { Logger } from './output/logger.js';
 import { ConsoleReporter } from './output/console.js';
-import { getAllAdapters } from './cli-adapters/index.js';
+import { getAllAdapters, getAdapter } from './cli-adapters/index.js';
+import { validateConfig } from './config/validator.js';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 
@@ -161,13 +162,111 @@ program
   .command('health')
   .description('Check CLI tool availability')
   .action(async () => {
-    const adapters = getAllAdapters();
+    // 1. Config validation
+    console.log(chalk.bold('Config validation:'));
+    const validationResult = await validateConfig();
+    
+    if (validationResult.filesChecked.length === 0) {
+      console.log(chalk.yellow('  No config files found'));
+    } else {
+      // List all files checked
+      for (const file of validationResult.filesChecked) {
+        const relativePath = path.relative(process.cwd(), file);
+        console.log(chalk.dim(`  ${relativePath}`));
+      }
+      
+      // Show validation results
+      if (validationResult.valid && validationResult.issues.length === 0) {
+        console.log(chalk.green('  ✓ All config files are valid'));
+      } else {
+        // Group issues by file
+        const issuesByFile = new Map<string, typeof validationResult.issues>();
+        for (const issue of validationResult.issues) {
+          const relativeFile = path.relative(process.cwd(), issue.file);
+          if (!issuesByFile.has(relativeFile)) {
+            issuesByFile.set(relativeFile, []);
+          }
+          issuesByFile.get(relativeFile)!.push(issue);
+        }
+        
+        // Display issues
+        for (const [file, issues] of issuesByFile.entries()) {
+          for (const issue of issues) {
+            const icon = issue.severity === 'error' ? chalk.red('✗') : chalk.yellow('⚠');
+            const fieldInfo = issue.field ? chalk.dim(` (${issue.field})`) : '';
+            console.log(`  ${icon} ${file}${fieldInfo}`);
+            console.log(`    ${issue.message}`);
+          }
+        }
+      }
+    }
+    
+    console.log();
+    
+    // 2. CLI Tool Health Check
     console.log(chalk.bold('CLI Tool Health Check:'));
     
-    for (const adapter of adapters) {
-      const available = await adapter.isAvailable();
-      const status = available ? chalk.green('Installed') : chalk.red('Missing');
-      console.log(`${adapter.name.padEnd(10)} : ${status}`);
+    try {
+      const config = await loadConfig();
+      
+      // Check for reviews configuration
+      const reviewEntries = Object.entries(config.reviews);
+      
+      if (reviewEntries.length === 0) {
+        console.log(chalk.yellow('  No CLI tools configured'));
+        console.log(chalk.dim('  No review gates found. Add review gates with cli_preference to check tool availability.'));
+        return;
+      }
+      
+      // Collect all unique agent names from review gate cli_preference settings
+      const preferredAgents = new Set<string>();
+      const reviewsWithEmptyPreference: string[] = [];
+      
+      reviewEntries.forEach(([reviewName, review]) => {
+        if (!review.cli_preference || review.cli_preference.length === 0) {
+          reviewsWithEmptyPreference.push(reviewName);
+        } else {
+          review.cli_preference.forEach(agent => preferredAgents.add(agent));
+        }
+      });
+      
+      // Check for misconfigurations
+      if (reviewsWithEmptyPreference.length > 0) {
+        console.log(chalk.yellow('  ⚠️  Misconfiguration detected:'));
+        reviewsWithEmptyPreference.forEach(name => {
+          console.log(chalk.yellow(`     Review gate "${name}" has empty cli_preference`));
+        });
+        console.log();
+      }
+      
+      // If no agents are configured, show message
+      if (preferredAgents.size === 0) {
+        console.log(chalk.yellow('  No CLI tools configured'));
+        console.log(chalk.dim('  All review gates have empty cli_preference. Add tools to cli_preference to check availability.'));
+        return;
+      }
+      
+      // Check the configured agents
+      for (const agentName of Array.from(preferredAgents).sort()) {
+        const adapter = getAdapter(agentName);
+        if (adapter) {
+          const available = await adapter.isAvailable();
+          const status = available ? chalk.green('Installed') : chalk.red('Missing');
+          console.log(`  ${adapter.name.padEnd(10)} : ${status}`);
+        } else {
+          console.log(`  ${agentName.padEnd(10)} : ${chalk.yellow('Unknown')}`);
+        }
+      }
+    } catch (error: any) {
+      // If config can't be loaded, fall back to checking all adapters
+      const adapters = getAllAdapters();
+      console.log(chalk.dim('  (Config not found, checking all supported agents)'));
+      
+      for (const adapter of adapters) {
+        const available = await adapter.isAvailable();
+        const status = available ? chalk.green('Installed') : chalk.red('Missing');
+        console.log(`  ${adapter.name.padEnd(10)} : ${status}`);
+      }
     }
   });
 
