@@ -53,7 +53,7 @@ export class Runner {
       sequentialPromise
     ]);
 
-    this.reporter.printSummary(this.results);
+    await this.reporter.printSummary(this.results);
 
     return this.results.every(r => r.status === 'pass');
   }
