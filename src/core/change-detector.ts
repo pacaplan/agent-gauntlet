@@ -42,14 +42,13 @@ export class ChangeDetector {
     // 2. Uncommitted changes (staged and unstaged)
     const { stdout: uncommitted } = await execAsync('git diff --name-only HEAD');
     
-    // 3. Untracked files? (git ls-files --others --exclude-standard)
-    // The spec implies "uncommitted changes", usually tracked files. 
-    // But untracked files are also changes. Let's include them if useful, but standard diff usually ignores them.
-    // For now, sticking to tracked files.
+    // 3. Untracked files
+    const { stdout: untracked } = await execAsync('git ls-files --others --exclude-standard');
 
     const files = new Set([
       ...this.parseOutput(committed),
-      ...this.parseOutput(uncommitted)
+      ...this.parseOutput(uncommitted),
+      ...this.parseOutput(untracked)
     ]);
 
     return Array.from(files);

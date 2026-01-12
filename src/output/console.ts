@@ -9,13 +9,14 @@ export class ConsoleReporter {
 
   onJobComplete(job: Job, result: GateResult) {
     const duration = (result.duration / 1000).toFixed(2) + 's';
+    const message = result.message ?? '';
     
     if (result.status === 'pass') {
       console.log(chalk.green(`[PASS]  ${job.id} (${duration})`));
     } else if (result.status === 'fail') {
-      console.log(chalk.red(`[FAIL]  ${job.id} (${duration}) - ${result.message}`));
+      console.log(chalk.red(`[FAIL]  ${job.id} (${duration}) - ${message}`));
     } else {
-      console.log(chalk.magenta(`[ERROR] ${job.id} (${duration}) - ${result.message}`));
+      console.log(chalk.magenta(`[ERROR] ${job.id} (${duration}) - ${message}`));
     }
   }
 
@@ -34,7 +35,8 @@ export class ConsoleReporter {
     if (failed.length > 0 || errored.length > 0) {
       console.log('\nIssues found in:');
       [...failed, ...errored].forEach(r => {
-        console.log(chalk.red(`- ${r.jobId}: ${r.message}`));
+        const logHint = r.logPath ? ` (log: ${r.logPath})` : '';
+        console.log(chalk.red(`- ${r.jobId}: ${r.message ?? 'Unknown error'}${logHint}`));
       });
     }
   }

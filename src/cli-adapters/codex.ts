@@ -6,6 +6,7 @@ import path from 'node:path';
 import os from 'node:os';
 
 const execAsync = promisify(exec);
+const MAX_BUFFER_BYTES = 10 * 1024 * 1024;
 
 export class CodexAdapter implements CLIAdapter {
   name = 'codex';
@@ -19,7 +20,7 @@ export class CodexAdapter implements CLIAdapter {
     }
   }
 
-  async execute(opts: { prompt: string; diff: string; context?: string; model?: string }): Promise<string> {
+  async execute(opts: { prompt: string; diff: string; context?: string; model?: string; timeoutMs?: number }): Promise<string> {
     let fullContent = opts.prompt + "\n\n--- DIFF ---" + opts.diff;
     if (opts.context) {
       fullContent += "\n\n--- CONTEXT ---" + opts.context;
@@ -31,7 +32,7 @@ export class CodexAdapter implements CLIAdapter {
 
     try {
       const cmd = `cat "${tmpFile}" | codex exec -`;
-      const { stdout } = await execAsync(cmd);
+      const { stdout } = await execAsync(cmd, { timeout: opts.timeoutMs, maxBuffer: MAX_BUFFER_BYTES });
       return stdout;
     } finally {
       await fs.unlink(tmpFile).catch(() => {});

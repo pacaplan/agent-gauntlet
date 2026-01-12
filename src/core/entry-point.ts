@@ -1,5 +1,4 @@
 import path from 'node:path';
-import fs from 'node:fs/promises';
 import { EntryPointConfig } from '../config/types.js';
 
 export interface ExpandedEntryPoint {
@@ -19,8 +18,9 @@ export class EntryPointExpander {
     // Spec says: "A root entry point always exists and applies to repository-wide gates."
     // Usually root gates run on any change or specific files in root.
     // For simplicity, if root is configured, we'll include it if there are any changed files.
-    if (rootEntryPoint && changedFiles.length > 0) {
-      results.push({ path: '.', config: rootEntryPoint });
+    if (changedFiles.length > 0) {
+      const rootConfig = rootEntryPoint ?? { path: '.' };
+      results.push({ path: '.', config: rootConfig });
     }
 
     for (const ep of entryPoints) {

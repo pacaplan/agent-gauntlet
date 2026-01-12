@@ -6,6 +6,7 @@ import path from 'node:path';
 import os from 'node:os';
 
 const execAsync = promisify(exec);
+const MAX_BUFFER_BYTES = 10 * 1024 * 1024;
 
 export class GeminiAdapter implements CLIAdapter {
   name = 'gemini';
@@ -19,7 +20,7 @@ export class GeminiAdapter implements CLIAdapter {
     }
   }
 
-  async execute(opts: { prompt: string; diff: string; context?: string; model?: string }): Promise<string> {
+  async execute(opts: { prompt: string; diff: string; context?: string; model?: string; timeoutMs?: number }): Promise<string> {
     // Construct the full prompt content
     let fullContent = opts.prompt + "\n\n--- DIFF ---" + opts.diff;
     if (opts.context) {
@@ -39,7 +40,7 @@ export class GeminiAdapter implements CLIAdapter {
       // For this prototype, we'll try to pipe it in.
       
       const cmd = `cat "${tmpFile}" | gemini`; 
-      const { stdout } = await execAsync(cmd);
+      const { stdout } = await execAsync(cmd, { timeout: opts.timeoutMs, maxBuffer: MAX_BUFFER_BYTES });
       return stdout;
     } finally {
       await fs.unlink(tmpFile).catch(() => {});

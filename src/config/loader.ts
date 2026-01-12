@@ -2,13 +2,12 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import YAML from 'yaml';
 import matter from 'gray-matter';
-import { z } from 'zod';
 import { 
   gauntletConfigSchema, 
   checkGateSchema, 
   reviewPromptFrontmatterSchema 
 } from './schema.js';
-import { LoadedConfig, CheckGateConfig, ReviewGateConfig } from './types.js';
+import { LoadedConfig, CheckGateConfig } from './types.js';
 
 const GAUNTLET_DIR = '.gauntlet';
 const CONFIG_FILE = 'config.yml';
@@ -60,35 +59,12 @@ export async function loadConfig(rootDir: string = process.cwd()): Promise<Loade
         
         const parsedFrontmatter = reviewPromptFrontmatterSchema.parse(frontmatter);
         const name = path.basename(file, '.md');
-        
-        // Construct the full review gate config object
-        // Note: The YAML frontmatter in the .md file acts as the configuration
-        // We ensure defaults are respected via the Zod schema
-        
-        // If cli_preference is missing in frontmatter, it MUST be provided elsewhere or fail validation if strict
-        // But our schema allows optional, so we need to handle that logic or ensure defaults
-        
-        if (!parsedFrontmatter.cli_preference || parsedFrontmatter.cli_preference.length === 0) {
-           // We might want to allow this if it's set globally, but for now let's error or assume defaults
-           // The spec says cli_preference is required for review gates.
-           // However, we are parsing frontmatter which allows it to be optional in the schema I wrote
-           // let's default to a dummy or error if empty.
-        }
 
         reviews[name] = {
           name,
           prompt: file, // Store filename relative to reviews dir
           promptContent: promptBody, // Store the actual prompt content for easy access
-          ...parsedFrontmatter,
-          // Defaults that aren't in frontmatter schema but are in ReviewGateConfig
-          // We map frontmatter fields to ReviewGateConfig fields
-          run_in_ci: true, 
-          run_locally: true,
-          parallel: true,
-          include_context: parsedFrontmatter.include_context ?? false,
-          include_full_repo: parsedFrontmatter.include_full_repo ?? false,
-          num_reviews: parsedFrontmatter.num_reviews ?? 1,
-          cli_preference: parsedFrontmatter.cli_preference ?? [], 
+          ...parsedFrontmatter
         };
       }
     }
