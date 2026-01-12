@@ -62,7 +62,11 @@ Edit `.gauntlet/config.yml` and add `entry_points` that reference your check/rev
 
 ## Commands
 
-### `agent-gauntlet` / `agent-gauntlet run`
+### `agent-gauntlet` / `agent-gauntlet help`
+
+Shows help information and available commands. This is the default when no command is provided.
+
+### `agent-gauntlet run`
 
 Runs applicable gates for detected changes.
 
@@ -112,6 +116,10 @@ Checks availability of supported review CLIs (`gemini`, `codex`, `claude`).
 ### `agent-gauntlet init`
 
 Creates `.gauntlet/` with a minimal starter config and a sample review prompt.
+
+### `agent-gauntlet help`
+
+Shows help information, including an overview of Agent Gauntlet and all available commands. This is the default command when no command is provided.
 
 ## Change detection
 
