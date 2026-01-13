@@ -20,6 +20,15 @@ export class CodexAdapter implements CLIAdapter {
     }
   }
 
+  async checkHealth(): Promise<{ available: boolean; status: 'healthy' | 'missing' | 'unhealthy'; message?: string }> {
+    const available = await this.isAvailable();
+    return {
+      available,
+      status: available ? 'healthy' : 'missing',
+      message: available ? 'Installed' : 'Command not found'
+    };
+  }
+
   getProjectCommandDir(): string | null {
     // Codex only supports user-level prompts at ~/.codex/prompts/
     // No project-scoped commands available

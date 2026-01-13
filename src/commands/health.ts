@@ -98,9 +98,22 @@ export function registerHealthCommand(program: Command): void {
         for (const agentName of Array.from(preferredAgents).sort()) {
           const adapter = getAdapter(agentName);
           if (adapter) {
-            const available = await adapter.isAvailable();
-            const status = available ? chalk.green('Installed') : chalk.red('Missing');
-            console.log(`  ${adapter.name.padEnd(10)} : ${status}`);
+            const health = await adapter.checkHealth();
+            let statusStr = '';
+            
+            switch (health.status) {
+              case 'healthy':
+                statusStr = chalk.green('Installed');
+                break;
+              case 'missing':
+                statusStr = chalk.red('Missing');
+                break;
+              case 'unhealthy':
+                statusStr = chalk.red(`${health.message || 'Unhealthy'}`);
+                break;
+            }
+            
+            console.log(`  ${adapter.name.padEnd(10)} : ${statusStr}`);
           } else {
             console.log(`  ${agentName.padEnd(10)} : ${chalk.yellow('Unknown')}`);
           }
@@ -111,9 +124,21 @@ export function registerHealthCommand(program: Command): void {
         console.log(chalk.dim('  (Config not found, checking all supported agents)'));
         
         for (const adapter of adapters) {
-          const available = await adapter.isAvailable();
-          const status = available ? chalk.green('Installed') : chalk.red('Missing');
-          console.log(`  ${adapter.name.padEnd(10)} : ${status}`);
+          const health = await adapter.checkHealth();
+          let statusStr = '';
+          
+          switch (health.status) {
+            case 'healthy':
+              statusStr = chalk.green('Installed');
+              break;
+            case 'missing':
+              statusStr = chalk.red('Missing');
+              break;
+            case 'unhealthy':
+              statusStr = chalk.red(`${health.message || 'Unhealthy'}`);
+              break;
+          }
+          console.log(`  ${adapter.name.padEnd(10)} : ${statusStr}`);
         }
       }
     });

@@ -71,9 +71,6 @@ export class ReviewGateExecutor {
       await logger(`Entry point: ${entryPointPath}\n`);
       await logger(`Base branch: ${baseBranch}\n`);
 
-      const adapters = await this.selectAdapters(config);
-      await logger(`Using CLI tools: ${adapters.map(adapter => adapter.name).join(', ')}\n`);
-
       const diff = await this.getDiff(entryPointPath, baseBranch, changeOptions);
       if (!diff.trim()) {
         await logger('No changes found in entry point, skipping review.\n');
@@ -86,50 +83,91 @@ export class ReviewGateExecutor {
         };
       }
 
-      // Always inject JSON instruction (which includes dynamic context guidance)
+      const required = config.num_reviews ?? 1;
       const outputs: Array<{ adapter: string; status: 'pass' | 'fail' | 'error'; message: string }> = [];
-
-      for (const adapter of adapters) {
-        // Look up previous violations for THIS adapter
-        const adapterPreviousViolations = previousFailures?.get(adapter.name) || [];
-
-        // Build the prompt with adapter-specific previous failures
-        const finalPrompt = this.constructPrompt(config, adapterPreviousViolations);
-
-        const output = await adapter.execute({
-          prompt: finalPrompt,
-          diff,
-          model: config.model,
-          timeoutMs: config.timeout ? config.timeout * 1000 : undefined
-        });
-
-        await logger(`\n--- Review Output (${adapter.name}) ---\n${output}\n`);
+      const usedAdapters = new Set<string>();
+      
+      const preferences = config.cli_preference || [];
+      
+      for (const toolName of preferences) {
+        if (usedAdapters.size >= required) break;
         
-        const evaluation = this.evaluateOutput(output);
-        
-        // Log formatted summary for readability
-        if (evaluation.json) {
-            await logger(`\n--- Parsed Result ---\n`);
-            if (evaluation.json.status === 'fail' && Array.isArray(evaluation.json.violations)) {
-                await logger(`Status: FAIL\n`);
-                await logger(`Violations:\n`);
-                // Use for...of loop for async await inside
-                for (const [i, v] of evaluation.json.violations.entries()) {
-                    await logger(`${i+1}. ${v.file}:${v.line || '?'} - ${v.issue}\n`);
-                    if (v.fix) await logger(`   Fix: ${v.fix}\n`);
-                }
-            } else if (evaluation.json.status === 'pass') {
-                await logger(`Status: PASS\n`);
-                if (evaluation.json.message) await logger(`Message: ${evaluation.json.message}\n`);
-            } else {
-                 await logger(`Status: ${evaluation.json.status}\n`);
-                 await logger(`Raw: ${JSON.stringify(evaluation.json, null, 2)}\n`);
-            }
-             await logger(`---------------------\n`);
+        const adapter = getAdapter(toolName);
+        if (!adapter) continue;
+
+        // Check availability/health
+        // We use checkHealth() to skip if it's explicitly unhealthy (e.g. usage limit)
+        // This is a fast check before we try the heavy execution
+        const health = await adapter.checkHealth();
+        if (health.status === 'missing') {
+             // If missing, we silently skip (or maybe log debug?)
+             // consistent with original selectAdapters behavior (filter out unavailable)
+             continue;
+        }
+        if (health.status === 'unhealthy') {
+             await logger(`Skipping ${adapter.name}: ${health.message || 'Unhealthy'}\n`);
+             continue;
         }
 
-        outputs.push({ adapter: adapter.name, ...evaluation });
-        await logger(`Review result (${adapter.name}): ${evaluation.status} - ${evaluation.message}\n`);
+        try {
+          // Look up previous violations for THIS adapter
+          const adapterPreviousViolations = previousFailures?.get(adapter.name) || [];
+
+          // Build the prompt with adapter-specific previous failures
+          const finalPrompt = this.constructPrompt(config, adapterPreviousViolations);
+
+          const output = await adapter.execute({
+            prompt: finalPrompt,
+            diff,
+            model: config.model,
+            timeoutMs: config.timeout ? config.timeout * 1000 : undefined
+          });
+
+          await logger(`\n--- Review Output (${adapter.name}) ---\n${output}\n`);
+          
+          const evaluation = this.evaluateOutput(output);
+          
+          // Log formatted summary
+          if (evaluation.json) {
+              await logger(`\n--- Parsed Result ---\n`);
+              if (evaluation.json.status === 'fail' && Array.isArray(evaluation.json.violations)) {
+                  await logger(`Status: FAIL\n`);
+                  await logger(`Violations:\n`);
+                  for (const [i, v] of evaluation.json.violations.entries()) {
+                      await logger(`${i+1}. ${v.file}:${v.line || '?'} - ${v.issue}\n`);
+                      if (v.fix) await logger(`   Fix: ${v.fix}\n`);
+                  }
+              } else if (evaluation.json.status === 'pass') {
+                  await logger(`Status: PASS\n`);
+                  if (evaluation.json.message) await logger(`Message: ${evaluation.json.message}\n`);
+              } else {
+                   await logger(`Status: ${evaluation.json.status}\n`);
+                   await logger(`Raw: ${JSON.stringify(evaluation.json, null, 2)}\n`);
+              }
+               await logger(`---------------------\n`);
+          }
+
+          outputs.push({ adapter: adapter.name, ...evaluation });
+          await logger(`Review result (${adapter.name}): ${evaluation.status} - ${evaluation.message}\n`);
+          
+          usedAdapters.add(adapter.name);
+
+        } catch (error: any) {
+          await logger(`Error running ${adapter.name}: ${error.message}\n`);
+          await logger(`Attempts to fallback to next preferred tool...\n`);
+          // Continue loop to try next adapter
+        }
+      }
+
+      if (usedAdapters.size < required) {
+         const msg = `Failed to complete ${required} reviews. Completed: ${usedAdapters.size}. See logs for details.`;
+         await logger(`Result: error - ${msg}\n`);
+         return {
+            jobId,
+            status: 'error',
+            duration: Date.now() - startTime,
+            message: msg
+         };
       }
 
       const failed = outputs.find(result => result.status === 'fail');
@@ -155,7 +193,7 @@ export class ReviewGateExecutor {
         message
       };
     } catch (error: any) {
-      await logger(`Error: ${error.message}\n`);
+      await logger(`Critical Error: ${error.message}\n`);
       await logger('Result: error\n');
       return {
         jobId,
@@ -164,26 +202,6 @@ export class ReviewGateExecutor {
         message: error.message
       };
     }
-  }
-
-  private async selectAdapters(config: ReviewConfig): Promise<CLIAdapter[]> {
-    const required = config.num_reviews ?? 1;
-    const adapters: CLIAdapter[] = [];
-
-    for (const toolName of config.cli_preference || []) {
-      if (adapters.length >= required) break;
-      const tool = getAdapter(toolName);
-      if (!tool) continue;
-      if (await tool.isAvailable()) {
-        adapters.push(tool);
-      }
-    }
-
-    if (adapters.length < required) {
-      throw new Error(`No available CLI tool found for ${required} review(s) from preference list.`);
-    }
-
-    return adapters;
   }
 
   private async getDiff(

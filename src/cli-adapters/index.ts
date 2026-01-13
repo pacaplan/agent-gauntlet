@@ -1,6 +1,13 @@
+export interface CLIAdapterHealth {
+  available: boolean;
+  status: 'healthy' | 'missing' | 'unhealthy';
+  message?: string;
+}
+
 export interface CLIAdapter {
   name: string;
   isAvailable(): Promise<boolean>;
+  checkHealth(): Promise<CLIAdapterHealth>;
   execute(opts: { prompt: string; diff: string; model?: string; timeoutMs?: number }): Promise<string>;
   /**
    * Returns the project-scoped command directory path (relative to project root).

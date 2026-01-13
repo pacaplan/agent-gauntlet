@@ -172,7 +172,8 @@ export class Runner {
   private async checkAdapter(name: string): Promise<boolean> {
     const adapter = getAdapter(name);
     if (!adapter) return false;
-    return adapter.isAvailable();
+    const health = await adapter.checkHealth();
+    return health.status === 'healthy';
   }
 
   private getCommandName(command: string): string | null {

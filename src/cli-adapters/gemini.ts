@@ -20,6 +20,15 @@ export class GeminiAdapter implements CLIAdapter {
     }
   }
 
+  async checkHealth(): Promise<{ available: boolean; status: 'healthy' | 'missing' | 'unhealthy'; message?: string }> {
+    const available = await this.isAvailable();
+    return {
+      available,
+      status: available ? 'healthy' : 'missing',
+      message: available ? 'Installed' : 'Command not found'
+    };
+  }
+
   getProjectCommandDir(): string | null {
     return '.gemini/commands';
   }
