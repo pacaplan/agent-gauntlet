@@ -88,32 +88,24 @@ export class ReviewGateExecutor {
       const usedAdapters = new Set<string>();
       
       const preferences = config.cli_preference || [];
-      
-      for (const toolName of preferences) {
-        if (usedAdapters.size >= required) break;
-        
-        const adapter = getAdapter(toolName);
-        if (!adapter) continue;
+      const parallel = config.parallel ?? false;
 
-        // Check availability/health
-        // We use checkHealth() to skip if it's explicitly unhealthy (e.g. usage limit)
-        // This is a fast check before we try the heavy execution
+      // Helper function to run a single review with a specific adapter
+      const runAdapter = async (toolName: string): Promise<{ success: boolean; result?: any }> => {
+        const adapter = getAdapter(toolName);
+        if (!adapter) return { success: false };
+
         const health = await adapter.checkHealth();
-        if (health.status === 'missing') {
-             // If missing, we silently skip (or maybe log debug?)
-             // consistent with original selectAdapters behavior (filter out unavailable)
-             continue;
-        }
+        if (health.status === 'missing') return { success: false };
         if (health.status === 'unhealthy') {
              await logger(`Skipping ${adapter.name}: ${health.message || 'Unhealthy'}\n`);
-             continue;
+             return { success: false };
         }
 
         try {
-          // Look up previous violations for THIS adapter
+          await logger(`[START] review:.:${config.name} (${adapter.name})\n`);
+          
           const adapterPreviousViolations = previousFailures?.get(adapter.name) || [];
-
-          // Build the prompt with adapter-specific previous failures
           const finalPrompt = this.constructPrompt(config, adapterPreviousViolations);
 
           const output = await adapter.execute({
@@ -129,7 +121,7 @@ export class ReviewGateExecutor {
           
           // Log formatted summary
           if (evaluation.json) {
-              await logger(`\n--- Parsed Result ---\n`);
+              await logger(`\n--- Parsed Result (${adapter.name}) ---\n`);
               if (evaluation.json.status === 'fail' && Array.isArray(evaluation.json.violations)) {
                   await logger(`Status: FAIL\n`);
                   await logger(`Violations:\n`);
@@ -151,11 +143,62 @@ export class ReviewGateExecutor {
           await logger(`Review result (${adapter.name}): ${evaluation.status} - ${evaluation.message}\n`);
           
           usedAdapters.add(adapter.name);
+          return { success: true, result: evaluation };
 
         } catch (error: any) {
           await logger(`Error running ${adapter.name}: ${error.message}\n`);
-          await logger(`Attempts to fallback to next preferred tool...\n`);
-          // Continue loop to try next adapter
+          return { success: false };
+        }
+      };
+
+      if (parallel && required > 1) {
+        // Parallel Execution Logic
+        let completed = 0;
+        let nextIndex = 0;
+        const activePromises: Promise<void>[] = [];
+        
+        // Start initial batch
+        while (nextIndex < preferences.length && activePromises.length < required) {
+          const toolName = preferences[nextIndex++];
+          const p = (async () => {
+             const { success } = await runAdapter(toolName);
+             if (success) {
+               completed++;
+             } else {
+               // Fallback: try next available tool if we haven't met requirement
+               // We need a loop here because the next one might also be unhealthy/fail immediately
+               // We also need to lock/synchronize nextIndex access if we were truly multi-threaded, 
+               // but in JS event loop, simple variable access is safe enough provided we don't await in the critical section
+               // However, to keep it simple, we just check if we can launch another one.
+               
+               // Actually, simple "launch replacement" logic:
+               while (nextIndex < preferences.length) {
+                   // We need to launch a NEW task to replace this failed one, 
+                   // BUT we are currently inside the task wrapper.
+                   // It's cleaner to let the main loop handle launching, but we are inside Promise.all...
+                   // Let's use a recursive strategy for the "lane".
+                   
+                   const nextTool = preferences[nextIndex++];
+                   if (!nextTool) break;
+                   const result = await runAdapter(nextTool);
+                   if (result.success) {
+                       completed++;
+                       return;
+                   }
+                   // If failed, loop continues to next preference
+               }
+             }
+          })();
+          activePromises.push(p);
+        }
+        
+        await Promise.all(activePromises);
+
+      } else {
+        // Sequential Execution Logic
+        for (const toolName of preferences) {
+          if (usedAdapters.size >= required) break;
+          await runAdapter(toolName);
         }
       }
 
