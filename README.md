@@ -18,11 +18,39 @@ Agent Gauntlet is designed to be "tool-agnostic" by leveraging the AI CLI tools 
 
 ### Requirements
 
-- **Bun** (to run from source or build the compiled binary)
+- **Bun** or **Node.js** (runtime)
 - **git** (change detection and diffs)
-- For review gates: one or more supported AI CLIs installed (`gemini`, `codex`, `claude`). For the full list of tools and how they are used, see [CLI Invocation Details](.docs/cli-invocation-details.md)
+- For review gates: one or more supported AI CLIs installed (`gemini`, `codex`, `claude`). For the full list of tools and how they are used, see [CLI Invocation Details](docs/cli-invocation-details.md)
+
+### Installation
+
+You can install `agent-gauntlet` globally using `npm` or `bun`:
+
+**Using npm:**
+```bash
+npm install -g agent-gauntlet
+```
+
+**Using Bun (Recommended):**
+```bash
+bun add -g agent-gauntlet
+```
 
 ### Quick start
+
+- **Initialize configuration**
+
+```bash
+agent-gauntlet init
+```
+
+- **Run gates**
+
+```bash
+agent-gauntlet
+```
+
+### Development
 
 - **Install dependencies**
 
@@ -30,22 +58,10 @@ Agent Gauntlet is designed to be "tool-agnostic" by leveraging the AI CLI tools 
 bun install
 ```
 
-- **Build the CLI binary (recommended)**
+- **Build the CLI binary**
 
 ```bash
 bun run build
-```
-
-- **Initialize configuration**
-
-```bash
-./bin/agent-gauntlet init
-```
-
-- **Run gates**
-
-```bash
-./bin/agent-gauntlet
 ```
 
 ### Basic usage
