@@ -1,6 +1,6 @@
 import { exec } from 'node:child_process';
 import { promisify } from 'node:util';
-import { CLIAdapter } from './index.js';
+import type { CLIAdapter } from './index.js';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
@@ -18,6 +18,29 @@ export class ClaudeAdapter implements CLIAdapter {
     } catch {
       return false;
     }
+  }
+
+  getProjectCommandDir(): string | null {
+    return '.claude/commands';
+  }
+
+  getUserCommandDir(): string | null {
+    // Claude supports user-level commands at ~/.claude/commands
+    return path.join(os.homedir(), '.claude', 'commands');
+  }
+
+  getCommandExtension(): string {
+    return '.md';
+  }
+
+  canUseSymlink(): boolean {
+    // Claude uses the same Markdown format as our canonical file
+    return true;
+  }
+
+  transformCommand(markdownContent: string): string {
+    // Claude uses the same Markdown format, no transformation needed
+    return markdownContent;
   }
 
   async execute(opts: { prompt: string; diff: string; model?: string; timeoutMs?: number }): Promise<string> {

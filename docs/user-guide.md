@@ -86,6 +86,26 @@ Uses diff for a specific commit instead of the default change detection logic. T
 
 Uses diff for current uncommitted changes only (both staged and unstaged, plus untracked files). Ignores committed changes. Git-ignored files (via `.gitignore` or other git exclude files) are excluded from untracked file detection.
 
+### `agent-gauntlet check`
+
+Runs only applicable checks for detected changes. Reviews are skipped.
+
+- Detects changed files via `git` (committed + uncommitted + untracked locally; PR/push diffs in CI)
+- Expands entry points that match those changes
+- Runs only check gates for those active entry points
+
+Uses the same options as `run` (see above). When using `--gate <name>`, filters to a single check gate name.
+
+### `agent-gauntlet review`
+
+Runs only applicable reviews for detected changes. Checks are skipped.
+
+- Detects changed files via `git` (committed + uncommitted + untracked locally; PR/push diffs in CI)
+- Expands entry points that match those changes
+- Runs only review gates for those active entry points
+
+Uses the same options as `run` (see above). When using `--gate <name>`, filters to a single review gate name.
+
 ### `agent-gauntlet detect`
 
 Shows what gates would run for detected changes without actually executing them.
@@ -116,6 +136,32 @@ Checks availability of supported review CLIs (`gemini`, `codex`, `claude`).
 ### `agent-gauntlet init`
 
 Creates `.gauntlet/` with a minimal starter config and a sample review prompt.
+
+```text
+.gauntlet/
+  config.yml           # Entry points and settings
+  run_gauntlet.md      # Canonical /gauntlet command for CLI agents
+  checks/              # Check gate definitions
+  reviews/
+    code-quality.md    # Sample review prompt
+```
+
+#### Interactive prompts
+
+When run interactively, `init` prompts you to set up CLI agent commands:
+
+1. **Installation level**: Choose where to install the `/gauntlet` command:
+   - Don't install commands
+   - Project level (`.claude/commands/`, `.gemini/commands/`)
+   - User level (`~/.claude/commands/`, `~/.gemini/commands/`, `~/.codex/prompts/`)
+
+2. **Agent selection**: Choose which CLI agents to install for (Claude, Gemini, Codex, or all)
+
+Once installed, you can run `/gauntlet` directly in your CLI agent session to execute the verification suite.
+
+#### Options
+
+- `-y, --yes`: Skip prompts and use defaults (project-level commands for all supported agents)
 
 ### `agent-gauntlet help`
 

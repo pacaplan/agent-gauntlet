@@ -74,6 +74,10 @@ agent-gauntlet list
 agent-gauntlet health
 ```
 
+### Agent loop rules
+
+The `.gauntlet/run_gauntlet.md` file defines how AI agents should interact with the gauntlet. By default, agents will terminate after 4 runs (1 initial + 3 fix attempts). You can increase this limit by manually editing the termination conditions in that file.
+
 ### Configuration layout
 
 Agent Gauntlet loads configuration from your repository:

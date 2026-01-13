@@ -70,8 +70,8 @@ export class ConsoleReporter {
         
         for (let i = 0; i < sectionLines.length; i++) {
           const line = sectionLines[i];
-          // Match numbered violation lines: "1. file:line - issue"
-          const violationMatch = line.match(/^\d+\.\s+(.+?):(\d+)\s+-\s+(.+)$/);
+          // Match numbered violation lines: "1. file:line - issue" (line can be a number or '?')
+          const violationMatch = line.match(/^\d+\.\s+(.+?):(\d+|\?)\s+-\s+(.+)$/);
           if (violationMatch) {
             const file = violationMatch[1];
             const lineNum = violationMatch[2];
@@ -91,13 +91,16 @@ export class ConsoleReporter {
         }
       }
 
-      // If no parsed violations, look for JSON violations
+      // If no parsed violations, look for JSON violations (handles both minified and pretty-printed)
       if (details.length === 0) {
-        const jsonMatch = logContent.match(/\{"status":"fail","violations":\[(.*?)\]\}/s);
-        if (jsonMatch) {
+        // Find the first '{' and last '}' to extract JSON object
+        const jsonStart = logContent.indexOf('{');
+        const jsonEnd = logContent.lastIndexOf('}');
+        if (jsonStart !== -1 && jsonEnd !== -1 && jsonEnd > jsonStart) {
           try {
-            const json = JSON.parse(jsonMatch[0]);
-            if (json.violations && Array.isArray(json.violations)) {
+            const jsonStr = logContent.substring(jsonStart, jsonEnd + 1);
+            const json = JSON.parse(jsonStr);
+            if (json.status === 'fail' && json.violations && Array.isArray(json.violations)) {
               json.violations.forEach((v: any) => {
                 const file = v.file || 'unknown';
                 const line = v.line || '?';

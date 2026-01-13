@@ -202,8 +202,19 @@ export class ReviewGateExecutor {
     const diffs: string[] = [];
 
     for (const file of files) {
-      const diff = await this.execDiff(`git diff --no-index -- /dev/null ${this.quoteArg(file)}`);
-      if (diff.trim()) diffs.push(diff);
+      try {
+        const diff = await this.execDiff(`git diff --no-index -- /dev/null ${this.quoteArg(file)}`);
+        if (diff.trim()) diffs.push(diff);
+      } catch (error: any) {
+        // Only suppress errors for missing/deleted files (ENOENT or "Could not access")
+        // Re-throw other errors (permissions, git issues) so they surface properly
+        const msg = [error.message, error.stderr].filter(Boolean).join('\n');
+        if (msg.includes('Could not access') || msg.includes('ENOENT') || msg.includes('No such file')) {
+          // File was deleted/moved between listing and diff; skip it
+          continue;
+        }
+        throw error;
+      }
     }
 
     return diffs.join('\n');

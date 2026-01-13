@@ -1,6 +1,6 @@
 import { exec } from 'node:child_process';
 import { promisify } from 'node:util';
-import { CLIAdapter } from './index.js';
+import type { CLIAdapter } from './index.js';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
@@ -18,6 +18,31 @@ export class CodexAdapter implements CLIAdapter {
     } catch {
       return false;
     }
+  }
+
+  getProjectCommandDir(): string | null {
+    // Codex only supports user-level prompts at ~/.codex/prompts/
+    // No project-scoped commands available
+    return null;
+  }
+
+  getUserCommandDir(): string | null {
+    // Codex uses user-level prompts at ~/.codex/prompts/
+    return path.join(os.homedir(), '.codex', 'prompts');
+  }
+
+  getCommandExtension(): string {
+    return '.md';
+  }
+
+  canUseSymlink(): boolean {
+    // Codex uses the same Markdown format as our canonical file
+    return true;
+  }
+
+  transformCommand(markdownContent: string): string {
+    // Codex uses the same Markdown format as Claude, no transformation needed
+    return markdownContent;
   }
 
   async execute(opts: { prompt: string; diff: string; model?: string; timeoutMs?: number }): Promise<string> {
