@@ -29,16 +29,24 @@ export class ClaudeAdapter implements CLIAdapter {
     try {
       // Try a lightweight command to check if we're rate limited
       // We pipe empty string as input and limit turns to 1
-      await execAsync('echo "" | claude -p --max-turns 1', { timeout: 5000 });
+      const { stdout, stderr } = await execAsync('echo "" | claude -p --max-turns 1', { timeout: 5000 });
+      
+      const combined = (stdout || '') + (stderr || '');
+      if (this.isUsageLimit(combined)) {
+         return { 
+          available: true, 
+          status: 'unhealthy', 
+          message: 'Usage limit exceeded' 
+        };
+      }
+
       return { available: true, status: 'healthy', message: 'Ready' };
     } catch (error: any) {
       const stderr = error.stderr || '';
       const stdout = error.stdout || '';
-      const combined = stderr + stdout;
+      const combined = (stderr + stdout);
       
-      if (combined.toLowerCase().includes('usage limit') || 
-          combined.toLowerCase().includes('quota exceeded') ||
-          combined.toLowerCase().includes('rate limit')) {
+      if (this.isUsageLimit(combined)) {
         return { 
           available: true, 
           status: 'unhealthy', 
@@ -46,13 +54,20 @@ export class ClaudeAdapter implements CLIAdapter {
         };
       }
       
-      // Other errors might be just because we sent empty input, which is fine-ish
-      // or actual broken state. For now, assume if it runs, it's okay unless explicit limit.
-      // But if it failed with exit code, it might be safer to say healthy?
-      // Actually, if `claude` crashes on empty input, that's not necessarily "unhealthy" auth-wise.
-      // But let's assume if it's installed but throws specific errors, it's unhealthy.
+      // If it failed for another reason (but is installed), we still consider it "healthy" 
+      // in terms of "it's there", but maybe warn? 
+      // For now, sticking to previous logic: if installed but crashes on empty input, 
+      // it's likely just the empty input causing issues, not auth/quota.
       return { available: true, status: 'healthy', message: 'Installed (Checked)' };
     }
+  }
+
+  private isUsageLimit(output: string): boolean {
+    const lower = output.toLowerCase();
+    return lower.includes('usage limit') || 
+           lower.includes('quota exceeded') ||
+           lower.includes('rate limit') ||
+           lower.includes('credit balance is too low');
   }
 
   getProjectCommandDir(): string | null {
