@@ -27,8 +27,10 @@ export class ClaudeAdapter implements CLIAdapter {
     }
 
     try {
-      // Try a lightweight command to check availability
-      const { stdout, stderr } = await execAsync('claude --version', { timeout: 10000 });
+      // Try a lightweight command to check if we're rate limited
+      // We use a simple "hello" prompt to avoid "No messages returned" errors from empty input
+      // TODO: Add a config option to disable this or use a less intrusive health check (e.g., 'claude --version')
+      const { stdout, stderr } = await execAsync('echo "hello" | claude -p --max-turns 1', { timeout: 10000 });
       
       const combined = (stdout || '') + (stderr || '');
       if (this.isUsageLimit(combined)) {
@@ -68,7 +70,7 @@ export class ClaudeAdapter implements CLIAdapter {
     const lower = output.toLowerCase();
     return lower.includes('usage limit') || 
            lower.includes('quota exceeded') ||
-           lower.includes('rate limit') ||
+           lower.includes('quota will reset') ||
            lower.includes('credit balance is too low') ||
            lower.includes('out of extra usage') ||
            lower.includes('out of usage');

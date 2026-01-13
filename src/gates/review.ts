@@ -91,87 +91,32 @@ export class ReviewGateExecutor {
       const preferences = config.cli_preference || [];
       const parallel = config.parallel ?? false;
 
-      // Helper function to run a single review with a specific adapter
-      const runAdapter = async (toolName: string): Promise<{ success: boolean; result?: any }> => {
-        const adapter = getAdapter(toolName);
-        if (!adapter) return { success: false };
-
-        const health = await adapter.checkHealth();
-        if (health.status === 'missing') return { success: false };
-        if (health.status === 'unhealthy') {
-             await mainLogger(`Skipping ${adapter.name}: ${health.message || 'Unhealthy'}\n`);
-             return { success: false };
-        }
-
-        // Create per-adapter logger
-        const adapterLogger = await loggerFactory(adapter.name);
-
-        try {
-          const startMsg = `[START] review:.:${config.name} (${adapter.name})`;
-          await adapterLogger(`${startMsg}\n`);
-
-          const adapterPreviousViolations = previousFailures?.get(adapter.name) || [];
-          const finalPrompt = this.constructPrompt(config, adapterPreviousViolations);
-
-          const output = await adapter.execute({
-            prompt: finalPrompt,
-            diff,
-            model: config.model,
-            timeoutMs: config.timeout ? config.timeout * 1000 : undefined
-          });
-
-          await adapterLogger(`\n--- Review Output (${adapter.name}) ---\n${output}\n`);
-
-          const evaluation = this.evaluateOutput(output);
-
-          // Log formatted summary
-          if (evaluation.json) {
-              await adapterLogger(`\n--- Parsed Result (${adapter.name}) ---\n`);
-              if (evaluation.json.status === 'fail' && Array.isArray(evaluation.json.violations)) {
-                  await adapterLogger(`Status: FAIL\n`);
-                  await adapterLogger(`Violations:\n`);
-                  for (const [i, v] of evaluation.json.violations.entries()) {
-                      await adapterLogger(`${i+1}. ${v.file}:${v.line || '?'} - ${v.issue}\n`);
-                      if (v.fix) await adapterLogger(`   Fix: ${v.fix}\n`);
-                  }
-              } else if (evaluation.json.status === 'pass') {
-                  await adapterLogger(`Status: PASS\n`);
-                  if (evaluation.json.message) await adapterLogger(`Message: ${evaluation.json.message}\n`);
-              } else {
-                   await adapterLogger(`Status: ${evaluation.json.status}\n`);
-                   await adapterLogger(`Raw: ${JSON.stringify(evaluation.json, null, 2)}\n`);
-              }
-               await adapterLogger(`---------------------\n`);
-          }
-
-          outputs.push({ adapter: adapter.name, ...evaluation });
-          const resultMsg = `Review result (${adapter.name}): ${evaluation.status} - ${evaluation.message}`;
-          await adapterLogger(`${resultMsg}\n`);
-          await mainLogger(`${resultMsg}\n`);
-
-          usedAdapters.add(adapter.name);
-          return { success: true, result: evaluation };
-
-        } catch (error: any) {
-          const errorMsg = `Error running ${adapter.name}: ${error.message}`;
-          await adapterLogger(`${errorMsg}\n`);
-          await mainLogger(`${errorMsg}\n`);
-          return { success: false };
-        }
-      };
-
       if (parallel && required > 1) {
         // Parallel Execution Logic
-        // Pre-check health for all adapters to avoid race conditions
+        // Check health of adapters in parallel, but only as many as needed
         const healthyAdapters: string[] = [];
-        for (const toolName of preferences) {
-          const adapter = getAdapter(toolName);
-          if (!adapter) continue;
-          const health = await adapter.checkHealth();
-          if (health.status === 'healthy') {
-            healthyAdapters.push(toolName);
-          } else if (health.status === 'unhealthy') {
-            await mainLogger(`Skipping ${toolName}: ${health.message || 'Unhealthy'}\n`);
+        let prefIndex = 0;
+
+        while (healthyAdapters.length < required && prefIndex < preferences.length) {
+          const batchSize = required - healthyAdapters.length;
+          const batch = preferences.slice(prefIndex, prefIndex + batchSize);
+          prefIndex += batchSize;
+
+          const batchResults = await Promise.all(
+            batch.map(async (toolName) => {
+              const adapter = getAdapter(toolName);
+              if (!adapter) return { toolName, status: 'missing' as const };
+              const health = await adapter.checkHealth();
+              return { toolName, ...health };
+            })
+          );
+
+          for (const res of batchResults) {
+            if (res.status === 'healthy') {
+              healthyAdapters.push(res.toolName);
+            } else if (res.status === 'unhealthy') {
+              await mainLogger(`Skipping ${res.toolName}: ${res.message || 'Unhealthy'}\n`);
+            }
           }
         }
 
@@ -190,31 +135,44 @@ export class ReviewGateExecutor {
         const selectedAdapters = healthyAdapters.slice(0, required);
         await mainLogger(`Starting parallel reviews with: ${selectedAdapters.join(', ')}\n`);
 
-        const promises = selectedAdapters.map(toolName => runAdapter(toolName));
-        await Promise.all(promises);
+        const results = await Promise.all(
+          selectedAdapters.map((toolName) =>
+            this.runSingleReview(toolName, config, diff, loggerFactory, mainLogger, previousFailures, true)
+          )
+        );
 
+        for (const res of results) {
+          if (res) {
+            outputs.push({ adapter: res.adapter, ...res.evaluation });
+            usedAdapters.add(res.adapter);
+          }
+        }
       } else {
         // Sequential Execution Logic
         for (const toolName of preferences) {
           if (usedAdapters.size >= required) break;
-          await runAdapter(toolName);
+          const res = await this.runSingleReview(toolName, config, diff, loggerFactory, mainLogger, previousFailures);
+          if (res) {
+            outputs.push({ adapter: res.adapter, ...res.evaluation });
+            usedAdapters.add(res.adapter);
+          }
         }
       }
 
       if (usedAdapters.size < required) {
-         const msg = `Failed to complete ${required} reviews. Completed: ${usedAdapters.size}. See logs for details.`;
-         await mainLogger(`Result: error - ${msg}\n`);
-         return {
-            jobId,
-            status: 'error',
-            duration: Date.now() - startTime,
-            message: msg
-         };
+        const msg = `Failed to complete ${required} reviews. Completed: ${usedAdapters.size}. See logs for details.`;
+        await mainLogger(`Result: error - ${msg}\n`);
+        return {
+          jobId,
+          status: 'error',
+          duration: Date.now() - startTime,
+          message: msg
+        };
       }
 
       const failed = outputs.find(result => result.status === 'fail');
       const error = outputs.find(result => result.status === 'error');
-      
+
       let status: 'pass' | 'fail' | 'error' = 'pass';
       let message = 'Passed';
 
@@ -226,6 +184,8 @@ export class ReviewGateExecutor {
         message = `Failed (${failed.adapter}): ${failed.message}`;
       }
 
+      await mainLogger(`Result: ${status} - ${message}\n`);
+
       return {
         jobId,
         status,
@@ -234,12 +194,88 @@ export class ReviewGateExecutor {
       };
     } catch (error: any) {
       await mainLogger(`Critical Error: ${error.message}\n`);
+      await mainLogger('Result: error\n');
       return {
         jobId,
         status: 'error',
         duration: Date.now() - startTime,
         message: error.message
       };
+    }
+  }
+
+  private async runSingleReview(
+    toolName: string,
+    config: ReviewConfig,
+    diff: string,
+    loggerFactory: (adapterName?: string) => Promise<(output: string) => Promise<void>>,
+    mainLogger: (output: string) => Promise<void>,
+    previousFailures?: Map<string, PreviousViolation[]>,
+    skipHealthCheck: boolean = false
+  ): Promise<{ adapter: string; evaluation: { status: 'pass' | 'fail' | 'error'; message: string; json?: any } } | null> {
+    const adapter = getAdapter(toolName);
+    if (!adapter) return null;
+
+    if (!skipHealthCheck) {
+      const health = await adapter.checkHealth();
+      if (health.status === 'missing') return null;
+      if (health.status === 'unhealthy') {
+        await mainLogger(`Skipping ${adapter.name}: ${health.message || 'Unhealthy'}\n`);
+        return null;
+      }
+    }
+
+    // Create per-adapter logger
+    const adapterLogger = await loggerFactory(adapter.name);
+
+    try {
+      const startMsg = `[START] review:.:${config.name} (${adapter.name})`;
+      await adapterLogger(`${startMsg}\n`);
+
+      const adapterPreviousViolations = previousFailures?.get(adapter.name) || [];
+      const finalPrompt = this.constructPrompt(config, adapterPreviousViolations);
+
+      const output = await adapter.execute({
+        prompt: finalPrompt,
+        diff,
+        model: config.model,
+        timeoutMs: config.timeout ? config.timeout * 1000 : undefined
+      });
+
+      await adapterLogger(`\n--- Review Output (${adapter.name}) ---\n${output}\n`);
+
+      const evaluation = this.evaluateOutput(output);
+
+      // Log formatted summary
+      if (evaluation.json) {
+        await adapterLogger(`\n--- Parsed Result (${adapter.name}) ---\n`);
+        if (evaluation.json.status === 'fail' && Array.isArray(evaluation.json.violations)) {
+          await adapterLogger(`Status: FAIL\n`);
+          await adapterLogger(`Violations:\n`);
+          for (const [i, v] of evaluation.json.violations.entries()) {
+            await adapterLogger(`${i + 1}. ${v.file}:${v.line || '?'} - ${v.issue}\n`);
+            if (v.fix) await adapterLogger(`   Fix: ${v.fix}\n`);
+          }
+        } else if (evaluation.json.status === 'pass') {
+          await adapterLogger(`Status: PASS\n`);
+          if (evaluation.json.message) await adapterLogger(`Message: ${evaluation.json.message}\n`);
+        } else {
+          await adapterLogger(`Status: ${evaluation.json.status}\n`);
+          await adapterLogger(`Raw: ${JSON.stringify(evaluation.json, null, 2)}\n`);
+        }
+        await adapterLogger(`---------------------\n`);
+      }
+
+      const resultMsg = `Review result (${adapter.name}): ${evaluation.status} - ${evaluation.message}`;
+      await adapterLogger(`${resultMsg}\n`);
+      await mainLogger(`${resultMsg}\n`);
+
+      return { adapter: adapter.name, evaluation };
+    } catch (error: any) {
+      const errorMsg = `Error running ${adapter.name}: ${error.message}`;
+      await adapterLogger(`${errorMsg}\n`);
+      await mainLogger(`${errorMsg}\n`);
+      return null;
     }
   }
 
