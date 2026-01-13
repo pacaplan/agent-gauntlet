@@ -18,22 +18,22 @@ Agent Gauntlet is designed to be "tool-agnostic" by leveraging the AI CLI tools 
 
 ### Requirements
 
-- **Bun** or **Node.js** (runtime)
+- **Bun** (Required runtime, v1.0.0+)
 - **git** (change detection and diffs)
 - For review gates: one or more supported AI CLIs installed (`gemini`, `codex`, `claude`). For the full list of tools and how they are used, see [CLI Invocation Details](docs/cli-invocation-details.md)
 
 ### Installation
 
-You can install `agent-gauntlet` globally using `npm` or `bun`:
-
-**Using npm:**
-```bash
-npm install -g agent-gauntlet
-```
+You can install `agent-gauntlet` globally using `npm` or `bun` (Bun must be installed on the system in both cases):
 
 **Using Bun (Recommended):**
 ```bash
 bun add -g agent-gauntlet
+```
+
+**Using npm:**
+```bash
+npm install -g agent-gauntlet
 ```
 
 ### Quick start
