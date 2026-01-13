@@ -6,7 +6,7 @@
   "author": "Paul Caplan",
   "repository": {
     "type": "git",
-    "url": "https://github.com/pacaplan/agent-gauntlet.git"
+    "url": "git+https://github.com/pacaplan/agent-gauntlet.git"
   },
   "homepage": "https://github.com/pacaplan/agent-gauntlet",
   "bugs": {
@@ -25,7 +25,7 @@
     "LICENSE"
   ],
   "bin": {
-    "agent-gauntlet": "./src/index.ts"
+    "agent-gauntlet": "src/index.ts"
   },
   "type": "module",
   "engines": {
