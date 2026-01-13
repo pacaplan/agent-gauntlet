@@ -206,24 +206,29 @@ export async function validateConfig(rootDir: string = process.cwd()): Promise<V
             reviews[name] = parsedFrontmatter;
 
             // Semantic validation
-            if (!parsedFrontmatter.cli_preference || parsedFrontmatter.cli_preference.length === 0) {
-              issues.push({
-                file: filePath,
-                severity: 'error',
-                message: 'cli_preference is required and cannot be empty',
-                field: 'cli_preference',
-              });
-            } else {
-              // Validate each CLI tool name (double-check after parsing)
-              for (let i = 0; i < parsedFrontmatter.cli_preference.length; i++) {
-                const toolName = parsedFrontmatter.cli_preference[i];
-                if (!VALID_CLI_TOOLS.includes(toolName)) {
-                  issues.push({
-                    file: filePath,
-                    severity: 'error',
-                    message: `Invalid CLI tool "${toolName}" in cli_preference. Valid options are: ${VALID_CLI_TOOLS.join(', ')}`,
-                    field: `cli_preference[${i}]`,
-                  });
+            // cli_preference is optional; if missing, it defaults to project-level default_preference during load.
+            // See src/config/loader.ts loadConfig() for default merging logic.
+            // However, if explicitly provided, it must not be empty.
+            if (parsedFrontmatter.cli_preference !== undefined) {
+              if (parsedFrontmatter.cli_preference.length === 0) {
+                issues.push({
+                  file: filePath,
+                  severity: 'error',
+                  message: 'cli_preference if provided cannot be an empty array. Remove it to use defaults.',
+                  field: 'cli_preference',
+                });
+              } else {
+                // Validate each CLI tool name (double-check after parsing)
+                for (let i = 0; i < parsedFrontmatter.cli_preference.length; i++) {
+                  const toolName = parsedFrontmatter.cli_preference[i];
+                  if (!VALID_CLI_TOOLS.includes(toolName)) {
+                    issues.push({
+                      file: filePath,
+                      severity: 'error',
+                      message: `Invalid CLI tool "${toolName}" in cli_preference. Valid options are: ${VALID_CLI_TOOLS.join(', ')}`,
+                      field: `cli_preference[${i}]`,
+                    });
+                  }
                 }
               }
             }
