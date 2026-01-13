@@ -73,20 +73,21 @@ export class Runner {
 
     if (job.type === 'check') {
       result = await this.checkExecutor.execute(
-        job.id, 
-        job.gateConfig as any, 
-        job.workingDirectory, 
+        job.id,
+        job.gateConfig as any,
+        job.workingDirectory,
         jobLogger
       );
     } else {
       // Use sanitized Job ID for lookup because that's what log-parser uses (based on filenames)
       const safeJobId = sanitizeJobId(job.id);
       const previousFailures = this.previousFailuresMap?.get(safeJobId);
+      const loggerFactory = this.logger.createLoggerFactory(job.id);
       result = await this.reviewExecutor.execute(
-        job.id, 
-        job.gateConfig as any, 
-        job.entryPoint, 
-        jobLogger,
+        job.id,
+        job.gateConfig as any,
+        job.entryPoint,
+        loggerFactory,
         this.config.project.base_branch,
         previousFailures,
         this.changeOptions

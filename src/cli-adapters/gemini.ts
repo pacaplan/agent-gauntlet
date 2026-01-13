@@ -93,12 +93,12 @@ ${escapedBody}
     await fs.writeFile(tmpFile, fullContent);
 
     try {
-      // Recommended invocation per spec:
+      // Use gemini CLI with file input
       // --sandbox: enables the execution sandbox
       // --allowed-tools: whitelists read-only tools for non-interactive execution
       // --output-format text: ensures plain text output
-      
-      const cmd = `cat "${tmpFile}" | gemini --sandbox --allowed-tools read_file,list_directory,glob,search_file_content --output-format text`; 
+      // Use < for stdin redirection instead of cat pipe (cleaner)
+      const cmd = `gemini --sandbox --allowed-tools read_file,list_directory,glob,search_file_content --output-format text < "${tmpFile}"`;
       const { stdout } = await execAsync(cmd, { timeout: opts.timeoutMs, maxBuffer: MAX_BUFFER_BYTES });
       return stdout;
     } finally {

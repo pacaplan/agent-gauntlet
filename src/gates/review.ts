@@ -59,22 +59,23 @@ export class ReviewGateExecutor {
     jobId: string,
     config: ReviewConfig,
     entryPointPath: string,
-    logger: (output: string) => Promise<void>,
+    loggerFactory: (adapterName?: string) => Promise<(output: string) => Promise<void>>,
     baseBranch: string,
     previousFailures?: Map<string, PreviousViolation[]>,
     changeOptions?: { commit?: string; uncommitted?: boolean }
   ): Promise<GateResult> {
     const startTime = Date.now();
+    const mainLogger = await loggerFactory();
 
     try {
-      await logger(`[${new Date().toISOString()}] Starting review: ${config.name}\n`);
-      await logger(`Entry point: ${entryPointPath}\n`);
-      await logger(`Base branch: ${baseBranch}\n`);
+      await mainLogger(`Starting review: ${config.name}\n`);
+      await mainLogger(`Entry point: ${entryPointPath}\n`);
+      await mainLogger(`Base branch: ${baseBranch}\n`);
 
       const diff = await this.getDiff(entryPointPath, baseBranch, changeOptions);
       if (!diff.trim()) {
-        await logger('No changes found in entry point, skipping review.\n');
-        await logger('Result: pass - No changes to review\n');
+        await mainLogger('No changes found in entry point, skipping review.\n');
+        await mainLogger('Result: pass - No changes to review\n');
         return {
           jobId,
           status: 'pass',
@@ -98,13 +99,18 @@ export class ReviewGateExecutor {
         const health = await adapter.checkHealth();
         if (health.status === 'missing') return { success: false };
         if (health.status === 'unhealthy') {
-             await logger(`Skipping ${adapter.name}: ${health.message || 'Unhealthy'}\n`);
+             await mainLogger(`Skipping ${adapter.name}: ${health.message || 'Unhealthy'}\n`);
              return { success: false };
         }
 
+        // Create per-adapter logger
+        const adapterLogger = await loggerFactory(adapter.name);
+
         try {
-          await logger(`[START] review:.:${config.name} (${adapter.name})\n`);
-          
+          const startMsg = `[START] review:.:${config.name} (${adapter.name})`;
+          console.log(startMsg);
+          await adapterLogger(`${startMsg}\n`);
+
           const adapterPreviousViolations = previousFailures?.get(adapter.name) || [];
           const finalPrompt = this.constructPrompt(config, adapterPreviousViolations);
 
@@ -115,84 +121,78 @@ export class ReviewGateExecutor {
             timeoutMs: config.timeout ? config.timeout * 1000 : undefined
           });
 
-          await logger(`\n--- Review Output (${adapter.name}) ---\n${output}\n`);
-          
+          await adapterLogger(`\n--- Review Output (${adapter.name}) ---\n${output}\n`);
+
           const evaluation = this.evaluateOutput(output);
-          
+
           // Log formatted summary
           if (evaluation.json) {
-              await logger(`\n--- Parsed Result (${adapter.name}) ---\n`);
+              await adapterLogger(`\n--- Parsed Result (${adapter.name}) ---\n`);
               if (evaluation.json.status === 'fail' && Array.isArray(evaluation.json.violations)) {
-                  await logger(`Status: FAIL\n`);
-                  await logger(`Violations:\n`);
+                  await adapterLogger(`Status: FAIL\n`);
+                  await adapterLogger(`Violations:\n`);
                   for (const [i, v] of evaluation.json.violations.entries()) {
-                      await logger(`${i+1}. ${v.file}:${v.line || '?'} - ${v.issue}\n`);
-                      if (v.fix) await logger(`   Fix: ${v.fix}\n`);
+                      await adapterLogger(`${i+1}. ${v.file}:${v.line || '?'} - ${v.issue}\n`);
+                      if (v.fix) await adapterLogger(`   Fix: ${v.fix}\n`);
                   }
               } else if (evaluation.json.status === 'pass') {
-                  await logger(`Status: PASS\n`);
-                  if (evaluation.json.message) await logger(`Message: ${evaluation.json.message}\n`);
+                  await adapterLogger(`Status: PASS\n`);
+                  if (evaluation.json.message) await adapterLogger(`Message: ${evaluation.json.message}\n`);
               } else {
-                   await logger(`Status: ${evaluation.json.status}\n`);
-                   await logger(`Raw: ${JSON.stringify(evaluation.json, null, 2)}\n`);
+                   await adapterLogger(`Status: ${evaluation.json.status}\n`);
+                   await adapterLogger(`Raw: ${JSON.stringify(evaluation.json, null, 2)}\n`);
               }
-               await logger(`---------------------\n`);
+               await adapterLogger(`---------------------\n`);
           }
 
           outputs.push({ adapter: adapter.name, ...evaluation });
-          await logger(`Review result (${adapter.name}): ${evaluation.status} - ${evaluation.message}\n`);
-          
+          const resultMsg = `Review result (${adapter.name}): ${evaluation.status} - ${evaluation.message}`;
+          await adapterLogger(`${resultMsg}\n`);
+          await mainLogger(`${resultMsg}\n`);
+
           usedAdapters.add(adapter.name);
           return { success: true, result: evaluation };
 
         } catch (error: any) {
-          await logger(`Error running ${adapter.name}: ${error.message}\n`);
+          const errorMsg = `Error running ${adapter.name}: ${error.message}`;
+          await adapterLogger(`${errorMsg}\n`);
+          await mainLogger(`${errorMsg}\n`);
           return { success: false };
         }
       };
 
       if (parallel && required > 1) {
         // Parallel Execution Logic
-        let completed = 0;
-        let nextIndex = 0;
-        const activePromises: Promise<void>[] = [];
-        
-        // Start initial batch
-        while (nextIndex < preferences.length && activePromises.length < required) {
-          const toolName = preferences[nextIndex++];
-          const p = (async () => {
-             const { success } = await runAdapter(toolName);
-             if (success) {
-               completed++;
-             } else {
-               // Fallback: try next available tool if we haven't met requirement
-               // We need a loop here because the next one might also be unhealthy/fail immediately
-               // We also need to lock/synchronize nextIndex access if we were truly multi-threaded, 
-               // but in JS event loop, simple variable access is safe enough provided we don't await in the critical section
-               // However, to keep it simple, we just check if we can launch another one.
-               
-               // Actually, simple "launch replacement" logic:
-               while (nextIndex < preferences.length) {
-                   // We need to launch a NEW task to replace this failed one, 
-                   // BUT we are currently inside the task wrapper.
-                   // It's cleaner to let the main loop handle launching, but we are inside Promise.all...
-                   // Let's use a recursive strategy for the "lane".
-                   
-                   const nextTool = preferences[nextIndex++];
-                   if (!nextTool) break;
-                   const result = await runAdapter(nextTool);
-                   if (result.success) {
-                       completed++;
-                       return;
-                   }
-                   // If failed, loop continues to next preference
-               }
-             }
-          })();
-          activePromises.push(p);
+        // Pre-check health for all adapters to avoid race conditions
+        const healthyAdapters: string[] = [];
+        for (const toolName of preferences) {
+          const adapter = getAdapter(toolName);
+          if (!adapter) continue;
+          const health = await adapter.checkHealth();
+          if (health.status === 'healthy') {
+            healthyAdapters.push(toolName);
+          } else if (health.status === 'unhealthy') {
+            await mainLogger(`Skipping ${toolName}: ${health.message || 'Unhealthy'}\n`);
+          }
         }
-        
-        await Promise.all(activePromises);
+
+        if (healthyAdapters.length < required) {
+          const msg = `Not enough healthy adapters. Need ${required}, found ${healthyAdapters.length}.`;
+          await mainLogger(`Result: error - ${msg}\n`);
+          return {
+            jobId,
+            status: 'error',
+            duration: Date.now() - startTime,
+            message: msg
+          };
+        }
+
+        // Launch exactly 'required' reviews in parallel
+        const selectedAdapters = healthyAdapters.slice(0, required);
+        await mainLogger(`Starting parallel reviews with: ${selectedAdapters.join(', ')}\n`);
+
+        const promises = selectedAdapters.map(toolName => runAdapter(toolName));
+        await Promise.all(promises);
 
       } else {
         // Sequential Execution Logic
@@ -204,7 +204,7 @@ export class ReviewGateExecutor {
 
       if (usedAdapters.size < required) {
          const msg = `Failed to complete ${required} reviews. Completed: ${usedAdapters.size}. See logs for details.`;
-         await logger(`Result: error - ${msg}\n`);
+         await mainLogger(`Result: error - ${msg}\n`);
          return {
             jobId,
             status: 'error',
@@ -227,7 +227,7 @@ export class ReviewGateExecutor {
         message = `Failed (${failed.adapter}): ${failed.message}`;
       }
 
-      await logger(`Result: ${status} - ${message}\n`);
+      await mainLogger(`Result: ${status} - ${message}\n`);
 
       return {
         jobId,
@@ -236,8 +236,8 @@ export class ReviewGateExecutor {
         message
       };
     } catch (error: any) {
-      await logger(`Critical Error: ${error.message}\n`);
-      await logger('Result: error\n');
+      await mainLogger(`Critical Error: ${error.message}\n`);
+      await mainLogger('Result: error\n');
       return {
         jobId,
         status: 'error',

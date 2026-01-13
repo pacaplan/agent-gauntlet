@@ -2,27 +2,75 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { sanitizeJobId } from '../utils/sanitizer.js';
 
+function formatTimestamp(): string {
+  return new Date().toISOString();
+}
+
 export class Logger {
+  private initializedFiles: Set<string> = new Set();
+
   constructor(private logDir: string) {}
 
   async init() {
     await fs.mkdir(this.logDir, { recursive: true });
   }
 
-  getLogPath(jobId: string): string {
-    // Sanitize jobId to be a valid filename
+  async close() {
+    // No-op - using append mode
+  }
+
+  getLogPath(jobId: string, adapterName?: string): string {
     const safeName = sanitizeJobId(jobId);
+    if (adapterName) {
+      return path.join(this.logDir, `${safeName}_${adapterName}.log`);
+    }
     return path.join(this.logDir, `${safeName}.log`);
+  }
+
+  private async initFile(logPath: string): Promise<void> {
+    if (!this.initializedFiles.has(logPath)) {
+      await fs.writeFile(logPath, '');
+      this.initializedFiles.add(logPath);
+    }
   }
 
   async createJobLogger(jobId: string): Promise<(text: string) => Promise<void>> {
     const logPath = this.getLogPath(jobId);
-    
-    // Clear previous log
-    await fs.writeFile(logPath, '');
+    await this.initFile(logPath);
 
     return async (text: string) => {
-      await fs.appendFile(logPath, text);
+      const timestamp = formatTimestamp();
+      const lines = text.split('\n');
+      const output: string[] = [];
+      for (const line of lines) {
+        if (line.trim()) {
+          output.push(`[${timestamp}] ${line}`);
+        }
+      }
+      if (output.length > 0) {
+        await fs.appendFile(logPath, output.join('\n') + '\n');
+      }
+    };
+  }
+
+  createLoggerFactory(jobId: string): (adapterName?: string) => Promise<(text: string) => Promise<void>> {
+    return async (adapterName?: string) => {
+      const logPath = this.getLogPath(jobId, adapterName);
+      await this.initFile(logPath);
+
+      return async (text: string) => {
+        const timestamp = formatTimestamp();
+        const lines = text.split('\n');
+        const output: string[] = [];
+        for (const line of lines) {
+          if (line.trim()) {
+            output.push(`[${timestamp}] ${line}`);
+          }
+        }
+        if (output.length > 0) {
+          await fs.appendFile(logPath, output.join('\n') + '\n');
+        }
+      };
     };
   }
 }
