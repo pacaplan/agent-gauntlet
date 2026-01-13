@@ -11,6 +11,8 @@ import { ConsoleReporter } from '../output/console.js';
 import { GateResult } from '../gates/result.js';
 import { LoadedConfig, ReviewGateConfig, ReviewPromptFrontmatter } from '../config/types.js';
 import { getAdapter } from '../cli-adapters/index.js';
+import { PreviousViolation } from '../utils/log-parser.js';
+import { sanitizeJobId } from '../utils/sanitizer.js';
 
 const execAsync = promisify(exec);
 
@@ -23,7 +25,9 @@ export class Runner {
   constructor(
     private config: LoadedConfig,
     private logger: Logger,
-    private reporter: ConsoleReporter
+    private reporter: ConsoleReporter,
+    private previousFailuresMap?: Map<string, Map<string, PreviousViolation[]>>,
+    private changeOptions?: { commit?: string; uncommitted?: boolean }
   ) {}
 
   async run(jobs: Job[]): Promise<boolean> {
@@ -75,12 +79,17 @@ export class Runner {
         jobLogger
       );
     } else {
+      // Use sanitized Job ID for lookup because that's what log-parser uses (based on filenames)
+      const safeJobId = sanitizeJobId(job.id);
+      const previousFailures = this.previousFailuresMap?.get(safeJobId);
       result = await this.reviewExecutor.execute(
         job.id, 
         job.gateConfig as any, 
         job.entryPoint, 
         jobLogger,
-        this.config.project.base_branch
+        this.config.project.base_branch,
+        previousFailures,
+        this.changeOptions
       );
     }
 

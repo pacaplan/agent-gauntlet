@@ -1,9 +1,8 @@
 ---
 cli_preference:
-  - codex
-  - gemini
   - claude
-num_reviews: 1
+  - codex
+num_reviews: 2
 parallel: true
 
 ---

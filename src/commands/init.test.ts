@@ -48,10 +48,11 @@ describe('Init Command', () => {
     const initCmd = program.commands.find(cmd => cmd.name() === 'init');
     
     // Use a timeout to prevent hanging if prompts occur
+    let timeoutId: ReturnType<typeof setTimeout> | undefined;
     const testPromise = initCmd?.parseAsync(['init', '--yes']);
-    const timeoutPromise = new Promise((_, reject) => 
-      setTimeout(() => reject(new Error('Test timed out - init command may be prompting')), 3000)
-    );
+    const timeoutPromise = new Promise((_, reject) => {
+      timeoutId = setTimeout(() => reject(new Error('Test timed out - init command may be prompting')), 3000);
+    });
     
     try {
       await Promise.race([testPromise, timeoutPromise]);
@@ -85,6 +86,8 @@ describe('Init Command', () => {
         return;
       }
       throw error;
+    } finally {
+      if (timeoutId) clearTimeout(timeoutId);
     }
   });
 

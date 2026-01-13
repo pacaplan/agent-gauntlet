@@ -3,6 +3,7 @@ import { promisify } from 'node:util';
 import { ReviewGateConfig, ReviewPromptFrontmatter } from '../config/types.js';
 import { GateResult } from './result.js';
 import { CLIAdapter, getAdapter } from '../cli-adapters/index.js';
+import { PreviousViolation } from '../utils/log-parser.js';
 
 const execAsync = promisify(exec);
 
@@ -16,6 +17,7 @@ Use your available file-reading and search tools to find information.
 If the diff is insufficient or ambiguous, use your tools to read the full file content or related files.
 
 IMPORTANT: You must output ONLY a valid JSON object. Do not output any markdown text, explanations, or code blocks outside of the JSON.
+Each violation MUST include a "priority" field with one of: "critical", "high", "medium", "low".
 
 If violations are found:
 {
@@ -25,7 +27,8 @@ If violations are found:
       "file": "path/to/file.rb",
       "line": 10,
       "issue": "Description of the violation",
-      "fix": "Suggestion on how to fix it"
+      "fix": "Suggestion on how to fix it",
+      "priority": "high"
     }
   ]
 }
@@ -40,12 +43,26 @@ If NO violations are found:
 type ReviewConfig = ReviewGateConfig & ReviewPromptFrontmatter & { promptContent?: string };
 
 export class ReviewGateExecutor {
+  private constructPrompt(config: ReviewConfig, previousViolations: PreviousViolation[] = []): string {
+    const baseContent = config.promptContent || '';
+    
+    if (previousViolations.length > 0) {
+      return baseContent + 
+             '\n\n' + this.buildPreviousFailuresSection(previousViolations) + 
+             '\n' + JSON_SYSTEM_INSTRUCTION;
+    }
+    
+    return baseContent + '\n' + JSON_SYSTEM_INSTRUCTION;
+  }
+
   async execute(
     jobId: string,
     config: ReviewConfig,
     entryPointPath: string,
     logger: (output: string) => Promise<void>,
-    baseBranch: string
+    baseBranch: string,
+    previousFailures?: Map<string, PreviousViolation[]>,
+    changeOptions?: { commit?: string; uncommitted?: boolean }
   ): Promise<GateResult> {
     const startTime = Date.now();
 
@@ -57,7 +74,7 @@ export class ReviewGateExecutor {
       const adapters = await this.selectAdapters(config);
       await logger(`Using CLI tools: ${adapters.map(adapter => adapter.name).join(', ')}\n`);
 
-      const diff = await this.getDiff(entryPointPath, baseBranch);
+      const diff = await this.getDiff(entryPointPath, baseBranch, changeOptions);
       if (!diff.trim()) {
         await logger('No changes found in entry point, skipping review.\n');
         await logger('Result: pass - No changes to review\n');
@@ -70,12 +87,17 @@ export class ReviewGateExecutor {
       }
 
       // Always inject JSON instruction (which includes dynamic context guidance)
-      const prompt = (config.promptContent || '') + '\n' + JSON_SYSTEM_INSTRUCTION;
       const outputs: Array<{ adapter: string; status: 'pass' | 'fail' | 'error'; message: string }> = [];
 
       for (const adapter of adapters) {
+        // Look up previous violations for THIS adapter
+        const adapterPreviousViolations = previousFailures?.get(adapter.name) || [];
+
+        // Build the prompt with adapter-specific previous failures
+        const finalPrompt = this.constructPrompt(config, adapterPreviousViolations);
+
         const output = await adapter.execute({
-          prompt,
+          prompt: finalPrompt,
           diff,
           model: config.model,
           timeoutMs: config.timeout ? config.timeout * 1000 : undefined
@@ -164,7 +186,36 @@ export class ReviewGateExecutor {
     return adapters;
   }
 
-  private async getDiff(entryPointPath: string, baseBranch: string): Promise<string> {
+  private async getDiff(
+    entryPointPath: string,
+    baseBranch: string,
+    options?: { commit?: string; uncommitted?: boolean }
+  ): Promise<string> {
+    // If uncommitted mode is explicitly requested
+    if (options?.uncommitted) {
+      const pathArg = this.pathArg(entryPointPath);
+      // Match ChangeDetector.getUncommittedChangedFiles() behavior
+      const staged = await this.execDiff(`git diff --cached${pathArg}`);
+      const unstaged = await this.execDiff(`git diff${pathArg}`);
+      const untracked = await this.untrackedDiff(entryPointPath);
+      return [staged, unstaged, untracked].filter(Boolean).join('\n');
+    }
+
+    // If a specific commit is requested
+    if (options?.commit) {
+      const pathArg = this.pathArg(entryPointPath);
+      // Match ChangeDetector.getCommitChangedFiles() behavior
+      try {
+        return await this.execDiff(`git diff ${options.commit}^..${options.commit}${pathArg}`);
+      } catch (error: any) {
+        // Handle initial commit case
+        if (error.message?.includes('unknown revision') || error.stderr?.includes('unknown revision')) {
+            return await this.execDiff(`git diff --root ${options.commit}${pathArg}`);
+        }
+        throw error;
+      }
+    }
+
     const isCI = process.env.CI === 'true' || process.env.GITHUB_ACTIONS === 'true';
     return isCI
       ? this.getCIDiff(entryPointPath, baseBranch)
@@ -232,23 +283,91 @@ export class ReviewGateExecutor {
     }
   }
 
+  private buildPreviousFailuresSection(violations: PreviousViolation[]): string {
+    const lines = [
+      '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━',
+      'PREVIOUS FAILURES TO VERIFY (from last run)',
+      '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━',
+      '',
+      'The following violations were identified in the previous review. Your PRIMARY TASK is to verify whether these specific issues have been fixed in the current changes:',
+      ''
+    ];
+
+    violations.forEach((v, i) => {
+      lines.push(`${i + 1}. ${v.file}:${v.line} - ${v.issue}`);
+      if (v.fix) {
+        lines.push(`   Suggested fix: ${v.fix}`);
+      }
+      lines.push('');
+    });
+
+    lines.push('INSTRUCTIONS:');
+    lines.push('- Check if each violation listed above has been addressed in the diff');
+    lines.push('- For violations that are fixed, confirm they no longer appear');
+    lines.push('- For violations that remain unfixed, include them in your violations array');
+    lines.push('- Also check for any NEW violations in the changed code');
+    lines.push('- Return status "pass" only if ALL previous violations are fixed AND no new violations exist');
+    lines.push('');
+    lines.push('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+
+    return lines.join('\n');
+  }
+
   public evaluateOutput(output: string): { status: 'pass' | 'fail' | 'error'; message: string; json?: any } {
     try {
-      // 1. Extract JSON from potential noise
-      // Find the first '{' and last '}'
-      const start = output.indexOf('{');
-      const end = output.lastIndexOf('}');
-
-      if (start === -1 || end === -1 || end < start) {
-        return { status: 'error', message: 'No JSON object found in output' };
+      // 1. Try to extract from markdown code block first (most reliable)
+      const jsonBlockMatch = output.match(/```json\s*([\s\S]*?)\s*```/);
+      if (jsonBlockMatch) {
+        try {
+          const json = JSON.parse(jsonBlockMatch[1]);
+          return this.validateAndReturn(json);
+        } catch {
+          // If code block parse fails, fall back to other methods
+        }
       }
 
-      let jsonStr = output.substring(start, end + 1);
+      // 2. Fallback: Find the last valid JSON object
+      // This helps when there are braces in the explanation text before the actual JSON
+      // We start from the last '}' and search backwards for a matching '{' that creates valid JSON
+      const end = output.lastIndexOf('}');
+      if (end !== -1) {
+        let start = output.lastIndexOf('{', end);
+        while (start !== -1) {
+          const candidate = output.substring(start, end + 1);
+          try {
+            const json = JSON.parse(candidate);
+            // If we successfully parsed an object with 'status', it's likely our result
+            if (json.status) {
+              return this.validateAndReturn(json);
+            }
+          } catch {
+            // Not valid JSON, keep searching backwards
+          }
+          start = output.lastIndexOf('{', start - 1);
+        }
+      }
 
-      // Parse
-      const json = JSON.parse(jsonStr);
+      // 3. Last resort: simplistic extraction (original behavior)
+      const firstStart = output.indexOf('{');
+      if (firstStart !== -1 && end !== -1 && end > firstStart) {
+         try {
+            const candidate = output.substring(firstStart, end + 1);
+            const json = JSON.parse(candidate);
+            return this.validateAndReturn(json);
+         } catch {
+             // Ignore
+         }
+      }
 
-      // 3. Validate Schema
+      return { status: 'error', message: 'No valid JSON object found in output' };
+
+    } catch (error: any) {
+      return { status: 'error', message: `Failed to parse JSON output: ${error.message}` };
+    }
+  }
+
+  private validateAndReturn(json: any): { status: 'pass' | 'fail' | 'error'; message: string; json?: any } {
+      // Validate Schema
       if (!json.status || (json.status !== 'pass' && json.status !== 'fail')) {
          return { status: 'error', message: 'Invalid JSON: missing or invalid "status" field', json };
       }
@@ -268,10 +387,6 @@ export class ReviewGateExecutor {
       }
       
       return { status: 'fail', message: msg, json };
-
-    } catch (error: any) {
-      return { status: 'error', message: `Failed to parse JSON output: ${error.message}` };
-    }
   }
 
   private parseLines(stdout: string): string[] {

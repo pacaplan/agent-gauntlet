@@ -50,16 +50,12 @@ export class ClaudeAdapter implements CLIAdapter {
     const tmpFile = path.join(tmpDir, `gauntlet-claude-${Date.now()}.txt`);
     await fs.writeFile(tmpFile, fullContent);
 
-    // Get absolute path to repo root (CWD)
-    const repoRoot = process.cwd();
-
     try {
       // Recommended invocation per spec:
       // -p: non-interactive print mode
-      // --cwd: sets working directory to repo root
       // --allowedTools: explicitly restricts to read-only tools
       // --max-turns: caps agentic turns
-      const cmd = `cat "${tmpFile}" | claude -p --cwd "${repoRoot}" --allowedTools "Read,Glob,Grep" --max-turns 10`;
+      const cmd = `cat "${tmpFile}" | claude -p --allowedTools "Read,Glob,Grep" --max-turns 10`;
       const { stdout } = await execAsync(cmd, { timeout: opts.timeoutMs, maxBuffer: MAX_BUFFER_BYTES });
       return stdout;
     } finally {

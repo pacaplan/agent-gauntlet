@@ -1,4 +1,5 @@
 export { registerRunCommand } from './run.js';
+export { registerRerunCommand } from './rerun.js';
 export { registerCheckCommand } from './check.js';
 export { registerReviewCommand } from './review.js';
 export { registerDetectCommand } from './detect.js';

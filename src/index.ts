@@ -2,6 +2,7 @@
 import { Command } from 'commander';
 import {
   registerRunCommand,
+  registerRerunCommand,
   registerCheckCommand,
   registerReviewCommand,
   registerDetectCommand,
@@ -20,6 +21,7 @@ program
 
 // Register all commands
 registerRunCommand(program);
+registerRerunCommand(program);
 registerCheckCommand(program);
 registerReviewCommand(program);
 registerDetectCommand(program);

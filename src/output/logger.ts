@@ -1,5 +1,6 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import { sanitizeJobId } from '../utils/sanitizer.js';
 
 export class Logger {
   constructor(private logDir: string) {}
@@ -10,7 +11,7 @@ export class Logger {
 
   getLogPath(jobId: string): string {
     // Sanitize jobId to be a valid filename
-    const safeName = jobId.replace(/[^a-zA-Z0-9._-]/g, '_');
+    const safeName = sanitizeJobId(jobId);
     return path.join(this.logDir, `${safeName}.log`);
   }
 
