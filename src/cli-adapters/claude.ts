@@ -28,8 +28,8 @@ export class ClaudeAdapter implements CLIAdapter {
 
     try {
       // Try a lightweight command to check if we're rate limited
-      // We pipe empty string as input and limit turns to 1
-      const { stdout, stderr } = await execAsync('echo "" | claude -p --max-turns 1', { timeout: 5000 });
+      // We use a simple "hello" prompt to avoid "No messages returned" errors from empty input
+      const { stdout, stderr } = await execAsync('echo "hello" | claude -p --max-turns 1', { timeout: 10000 });
       
       const combined = (stdout || '') + (stderr || '');
       if (this.isUsageLimit(combined)) {
@@ -54,11 +54,14 @@ export class ClaudeAdapter implements CLIAdapter {
         };
       }
       
-      // If it failed for another reason (but is installed), we still consider it "healthy" 
-      // in terms of "it's there", but maybe warn? 
-      // For now, sticking to previous logic: if installed but crashes on empty input, 
-      // it's likely just the empty input causing issues, not auth/quota.
-      return { available: true, status: 'healthy', message: 'Installed (Checked)' };
+      // Since we sent a valid prompt ("hello"), any other error implies the tool is broken
+      // Extract a brief error message if possible
+      const cleanError = combined.split('\n')[0]?.trim() || error.message || 'Command failed';
+      return { 
+        available: true, 
+        status: 'unhealthy', 
+        message: `Error: ${cleanError}` 
+      };
     }
   }
 
@@ -67,7 +70,9 @@ export class ClaudeAdapter implements CLIAdapter {
     return lower.includes('usage limit') || 
            lower.includes('quota exceeded') ||
            lower.includes('rate limit') ||
-           lower.includes('credit balance is too low');
+           lower.includes('credit balance is too low') ||
+           lower.includes('out of extra usage') ||
+           lower.includes('out of usage');
   }
 
   getProjectCommandDir(): string | null {
