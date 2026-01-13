@@ -1,8 +1,4 @@
 ---
-cli_preference:
-  - claude
-  - gemini
-  - codex
 num_reviews: 2
 parallel: true
 

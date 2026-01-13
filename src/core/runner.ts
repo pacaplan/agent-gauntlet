@@ -90,7 +90,8 @@ export class Runner {
         loggerFactory,
         this.config.project.base_branch,
         previousFailures,
-        this.changeOptions
+        this.changeOptions,
+        this.config.project.cli.check_usage_limit
       );
     }
 
@@ -173,7 +174,9 @@ export class Runner {
   private async checkAdapter(name: string): Promise<boolean> {
     const adapter = getAdapter(name);
     if (!adapter) return false;
-    const health = await adapter.checkHealth();
+    const health = await adapter.checkHealth({ 
+      checkUsageLimit: this.config.project.cli.check_usage_limit 
+    });
     return health.status === 'healthy';
   }
 

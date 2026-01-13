@@ -52,6 +52,12 @@ export function registerInitCommand(program: Command): void {
       // Write sample config
       const sampleConfig = `base_branch: origin/main
 log_dir: .gauntlet_logs
+cli:
+  default_preference:
+    - gemini
+    - codex
+    - claude
+  check_usage_limit: false
 entry_points:
   - path: "."
     reviews:

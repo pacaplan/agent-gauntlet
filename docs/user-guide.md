@@ -263,6 +263,11 @@ The branch/ref to diff against in local runs.
 
 Directory where job logs are written.
 
+### `cli` (object, required)
+
+- `default_preference`: string[] (required) - Default list of CLI tools to use for reviews.
+- `check_usage_limit`: boolean (default: `false`) - Whether to check for usage limits during health checks.
+
 ### `allow_parallel` (boolean, default: `true`)
 
 Controls scheduling mode:
@@ -308,7 +313,7 @@ Review gates are defined by Markdown files with YAML frontmatter.
 
 ### Frontmatter fields
 
-- `cli_preference` (string[], required): ordered list of tools, e.g. `[gemini, codex, claude]`. For the full list of tools and how they are used, see [CLI Invocation Details](./cli-invocation-details.md)
+- `cli_preference` (string[], optional): ordered list of tools. If omitted, uses `cli.default_preference` from project config.
 - `num_reviews` (number, default: `1`): number of tools to run (chooses the first N available from `cli_preference`)
 - `model` (string, optional): passed through to adapters that support it
 - `parallel` (boolean, default: `true`)

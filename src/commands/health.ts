@@ -56,6 +56,7 @@ export function registerHealthCommand(program: Command): void {
       
       try {
         const config = await loadConfig();
+        const checkUsageLimit = config.project.cli.check_usage_limit;
         
         // Check for reviews configuration
         const reviewEntries = Object.entries(config.reviews);
@@ -74,11 +75,13 @@ export function registerHealthCommand(program: Command): void {
           if (!review.cli_preference || review.cli_preference.length === 0) {
             reviewsWithEmptyPreference.push(reviewName);
           } else {
-            review.cli_preference.forEach(agent => preferredAgents.add(agent));
+            review.cli_preference.forEach(agent => {
+              preferredAgents.add(agent);
+            });
           }
         });
         
-        // Check for misconfigurations
+        // Report Empty Preferences (Loader should handle this via default merging, but good to check)
         if (reviewsWithEmptyPreference.length > 0) {
           console.log(chalk.yellow('  ⚠️  Misconfiguration detected:'));
           reviewsWithEmptyPreference.forEach(name => {
@@ -98,7 +101,7 @@ export function registerHealthCommand(program: Command): void {
         for (const agentName of Array.from(preferredAgents).sort()) {
           const adapter = getAdapter(agentName);
           if (adapter) {
-            const health = await adapter.checkHealth();
+            const health = await adapter.checkHealth({ checkUsageLimit });
             let statusStr = '';
             
             switch (health.status) {

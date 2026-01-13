@@ -1,6 +1,6 @@
 import { exec } from 'node:child_process';
 import { promisify } from 'node:util';
-import type { CLIAdapter } from './index.js';
+import { type CLIAdapter, isUsageLimit } from './index.js';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
@@ -20,8 +20,51 @@ export class CodexAdapter implements CLIAdapter {
     }
   }
 
-  async checkHealth(): Promise<{ available: boolean; status: 'healthy' | 'missing' | 'unhealthy'; message?: string }> {
+  async checkHealth(options?: { checkUsageLimit?: boolean }): Promise<{ available: boolean; status: 'healthy' | 'missing' | 'unhealthy'; message?: string }> {
     const available = await this.isAvailable();
+    if (!available) {
+      return { available: false, status: 'missing', message: 'Command not found' };
+    }
+
+    if (options?.checkUsageLimit) {
+      try {
+        const repoRoot = process.cwd();
+        // Try a lightweight command to check if we're rate limited
+        const cmd = `echo "hello" | codex exec --cd "${repoRoot}" --sandbox read-only -c 'ask_for_approval="never"' -`;
+        const { stdout, stderr } = await execAsync(cmd, { timeout: 10000 });
+        
+        const combined = (stdout || '') + (stderr || '');
+        if (isUsageLimit(combined)) {
+           return { 
+            available: true, 
+            status: 'unhealthy', 
+            message: 'Usage limit exceeded' 
+          };
+        }
+  
+        return { available: true, status: 'healthy', message: 'Installed' };
+      } catch (error: any) {
+        const stderr = error.stderr || '';
+        const stdout = error.stdout || '';
+        const combined = (stderr + stdout);
+        
+        if (isUsageLimit(combined)) {
+          return { 
+            available: true, 
+            status: 'unhealthy', 
+            message: 'Usage limit exceeded' 
+          };
+        }
+        
+        const cleanError = combined.split('\n')[0]?.trim() || error.message || 'Command failed';
+        return { 
+          available: true, 
+          status: 'unhealthy', 
+          message: `Error: ${cleanError}` 
+        };
+      }
+    }
+
     return {
       available,
       status: available ? 'healthy' : 'missing',

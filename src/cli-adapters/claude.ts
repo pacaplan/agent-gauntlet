@@ -1,6 +1,6 @@
 import { exec } from 'node:child_process';
 import { promisify } from 'node:util';
-import type { CLIAdapter } from './index.js';
+import { type CLIAdapter, isUsageLimit } from './index.js';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
@@ -20,60 +20,53 @@ export class ClaudeAdapter implements CLIAdapter {
     }
   }
 
-  async checkHealth(): Promise<{ available: boolean; status: 'healthy' | 'missing' | 'unhealthy'; message?: string }> {
+  async checkHealth(options?: { checkUsageLimit?: boolean }): Promise<{ available: boolean; status: 'healthy' | 'missing' | 'unhealthy'; message?: string }> {
     const available = await this.isAvailable();
     if (!available) {
       return { available: false, status: 'missing', message: 'Command not found' };
     }
 
-    try {
-      // Try a lightweight command to check if we're rate limited
-      // We use a simple "hello" prompt to avoid "No messages returned" errors from empty input
-      // TODO: Add a config option to disable this or use a less intrusive health check (e.g., 'claude --version')
-      const { stdout, stderr } = await execAsync('echo "hello" | claude -p --max-turns 1', { timeout: 10000 });
-      
-      const combined = (stdout || '') + (stderr || '');
-      if (this.isUsageLimit(combined)) {
-         return { 
-          available: true, 
-          status: 'unhealthy', 
-          message: 'Usage limit exceeded' 
-        };
-      }
-
-      return { available: true, status: 'healthy', message: 'Ready' };
-    } catch (error: any) {
-      const stderr = error.stderr || '';
-      const stdout = error.stdout || '';
-      const combined = (stderr + stdout);
-      
-      if (this.isUsageLimit(combined)) {
+    if (options?.checkUsageLimit) {
+      try {
+        // Try a lightweight command to check if we're rate limited
+        // We use a simple "hello" prompt to avoid "No messages returned" errors from empty input
+        const { stdout, stderr } = await execAsync('echo "hello" | claude -p --max-turns 1', { timeout: 10000 });
+        
+        const combined = (stdout || '') + (stderr || '');
+        if (isUsageLimit(combined)) {
+           return { 
+            available: true, 
+            status: 'unhealthy', 
+            message: 'Usage limit exceeded' 
+          };
+        }
+  
+        return { available: true, status: 'healthy', message: 'Ready' };
+      } catch (error: any) {
+        const stderr = error.stderr || '';
+        const stdout = error.stdout || '';
+        const combined = (stderr + stdout);
+        
+        if (isUsageLimit(combined)) {
+          return { 
+            available: true, 
+            status: 'unhealthy', 
+            message: 'Usage limit exceeded' 
+          };
+        }
+        
+        // Since we sent a valid prompt ("hello"), any other error implies the tool is broken
+        // Extract a brief error message if possible
+        const cleanError = combined.split('\n')[0]?.trim() || error.message || 'Command failed';
         return { 
           available: true, 
           status: 'unhealthy', 
-          message: 'Usage limit exceeded' 
+          message: `Error: ${cleanError}` 
         };
       }
-      
-      // Since we sent a valid prompt ("hello"), any other error implies the tool is broken
-      // Extract a brief error message if possible
-      const cleanError = combined.split('\n')[0]?.trim() || error.message || 'Command failed';
-      return { 
-        available: true, 
-        status: 'unhealthy', 
-        message: `Error: ${cleanError}` 
-      };
     }
-  }
 
-  private isUsageLimit(output: string): boolean {
-    const lower = output.toLowerCase();
-    return lower.includes('usage limit') || 
-           lower.includes('quota exceeded') ||
-           lower.includes('quota will reset') ||
-           lower.includes('credit balance is too low') ||
-           lower.includes('out of extra usage') ||
-           lower.includes('out of usage');
+    return { available: true, status: 'healthy', message: 'Ready' };
   }
 
   getProjectCommandDir(): string | null {

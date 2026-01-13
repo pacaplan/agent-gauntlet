@@ -415,6 +415,54 @@ export async function validateConfig(rootDir: string = process.cwd()): Promise<V
         field: 'entry_points',
       });
     }
+
+    // Validate CLI config
+    if (projectConfig.cli) {
+      const defaults = projectConfig.cli.default_preference;
+      if (!defaults || !Array.isArray(defaults) || defaults.length === 0) {
+        issues.push({
+          file: configPath,
+          severity: 'error',
+          message: 'cli.default_preference is required and cannot be empty',
+          field: 'cli.default_preference',
+        });
+      } else {
+        // Validate defaults are valid tools
+        for (let i = 0; i < defaults.length; i++) {
+          const toolName = defaults[i];
+          if (!VALID_CLI_TOOLS.includes(toolName)) {
+            issues.push({
+              file: configPath,
+              severity: 'error',
+              message: `Invalid CLI tool "${toolName}" in default_preference. Valid options are: ${VALID_CLI_TOOLS.join(', ')}`,
+              field: `cli.default_preference[${i}]`,
+            });
+          }
+        }
+
+        // Validate review preferences against defaults
+        // We need to re-scan reviews here because we need the project config to be loaded first
+        // Ideally we would do this in the review loop, but we didn't have project config then.
+        // Instead, we'll iterate over the parsed reviews we collected.
+        const allowedTools = new Set(defaults);
+        for (const [reviewName, reviewConfig] of Object.entries(reviews)) {
+          const pref = (reviewConfig as any).cli_preference;
+          if (pref && Array.isArray(pref)) {
+             for (let i = 0; i < pref.length; i++) {
+               const tool = pref[i];
+               if (!allowedTools.has(tool)) {
+                 issues.push({
+                   file: path.join(reviewsPath, `${reviewName}.md`),
+                   severity: 'error',
+                   message: `CLI tool "${tool}" is not in project-level default_preference. Review gates can only use tools enabled in config.yml`,
+                   field: `cli_preference[${i}]`,
+                 });
+               }
+             }
+          }
+        }
+      }
+    }
   }
 
   const valid = issues.filter(i => i.severity === 'error').length === 0;

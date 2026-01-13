@@ -20,6 +20,11 @@ describe('Config Loader', () => {
     await fs.writeFile(path.join(GAUNTLET_DIR, 'config.yml'), `
 base_branch: origin/dev
 log_dir: test_logs
+cli:
+  default_preference:
+    - claude
+    - gemini
+  check_usage_limit: false
 entry_points:
   - path: src/
     checks:
@@ -43,6 +48,15 @@ cli_preference:
 
 # Security Review
 Check for vulnerabilities.
+`);
+
+    // Write a review definition without preference
+    await fs.writeFile(path.join(REVIEWS_DIR, 'style.md'), `---
+num_reviews: 1
+---
+
+# Style Review
+Check style.
 `);
   });
 
@@ -74,6 +88,13 @@ Check for vulnerabilities.
     expect(config.reviews['security'].name).toBe('security');
     expect(config.reviews['security'].cli_preference).toEqual(['gemini']);
     expect(config.reviews['security'].promptContent).toContain('Check for vulnerabilities.');
+  });
+
+  it('should merge default cli preference', async () => {
+    const config = await loadConfig(TEST_DIR);
+    
+    expect(Object.keys(config.reviews)).toContain('style');
+    expect(config.reviews['style'].cli_preference).toEqual(['claude', 'gemini']);
   });
 
   it('should reject check gate with fail_fast when parallel is true', async () => {

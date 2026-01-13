@@ -4,10 +4,20 @@ export interface CLIAdapterHealth {
   message?: string;
 }
 
+export function isUsageLimit(output: string): boolean {
+  const lower = output.toLowerCase();
+  return lower.includes('usage limit') || 
+         lower.includes('quota exceeded') ||
+         lower.includes('quota will reset') ||
+         lower.includes('credit balance is too low') ||
+         lower.includes('out of extra usage') ||
+         lower.includes('out of usage');
+}
+
 export interface CLIAdapter {
   name: string;
   isAvailable(): Promise<boolean>;
-  checkHealth(): Promise<CLIAdapterHealth>;
+  checkHealth(options?: { checkUsageLimit?: boolean }): Promise<CLIAdapterHealth>;
   execute(opts: { prompt: string; diff: string; model?: string; timeoutMs?: number }): Promise<string>;
   /**
    * Returns the project-scoped command directory path (relative to project root).

@@ -66,6 +66,40 @@ export async function loadConfig(rootDir: string = process.cwd()): Promise<Loade
           promptContent: promptBody, // Store the actual prompt content for easy access
           ...parsedFrontmatter
         };
+
+        // Merge default CLI preference if not specified
+        if (!reviews[name].cli_preference) {
+          reviews[name].cli_preference = projectConfig.cli.default_preference;
+        } else {
+          // Validate that specified preferences are allowed by project config
+          const allowedTools = new Set(projectConfig.cli.default_preference);
+          for (const tool of reviews[name].cli_preference) {
+            if (!allowedTools.has(tool)) {
+              throw new Error(`Review "${name}" uses CLI tool "${tool}" which is not in the project-level allowed list (cli.default_preference).`);
+            }
+          }
+        }
+      }
+    }
+  }
+
+  // 4. Validate entry point references
+  const checkNames = new Set(Object.keys(checks));
+  const reviewNames = new Set(Object.keys(reviews));
+
+  for (const entryPoint of projectConfig.entry_points) {
+    if (entryPoint.checks) {
+      for (const checkName of entryPoint.checks) {
+        if (!checkNames.has(checkName)) {
+          throw new Error(`Entry point "${entryPoint.path}" references non-existent check gate: "${checkName}"`);
+        }
+      }
+    }
+    if (entryPoint.reviews) {
+      for (const reviewName of entryPoint.reviews) {
+        if (!reviewNames.has(reviewName)) {
+          throw new Error(`Entry point "${entryPoint.path}" references non-existent review gate: "${reviewName}"`);
+        }
       }
     }
   }

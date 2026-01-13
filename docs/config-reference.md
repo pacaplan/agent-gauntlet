@@ -21,6 +21,11 @@ This document lists the configuration files Agent Gauntlet loads and all support
   The git ref used as the “base” when detecting changes locally (via `git diff base...HEAD`). In CI, the runner prefers GitHub-provided refs (e.g. `GITHUB_BASE_REF`) when available.
 - **log_dir**: string (default: `.gauntlet_logs`)  
   Directory where per-job logs are written. Each gate run writes a log file named from the job id (sanitized).
+- **cli**: object (required)
+  - **default_preference**: string[] (required)  
+    Default ordered list of review CLI tools to try when a review gate doesn't specify its own `cli_preference`.
+  - **check_usage_limit**: boolean (default: `false`)  
+    If `true`, health checks will probe for usage limits/quotas (which may consume a small amount of tokens).
 - **allow_parallel**: boolean (default: `true`)  
   If `true`, gates with `parallel: true` run concurrently, while `parallel: false` gates run sequentially. If `false`, all gates run sequentially regardless of per-gate settings.
 - **entry_points**: array (required)  
@@ -38,6 +43,12 @@ This document lists the configuration files Agent Gauntlet loads and all support
 base_branch: origin/main
 log_dir: .gauntlet_logs
 allow_parallel: true
+cli:
+  default_preference:
+    - gemini
+    - codex
+    - claude
+  check_usage_limit: false
 
 entry_points:
   - path: "."
@@ -99,8 +110,8 @@ Review gates are defined by Markdown files with YAML frontmatter.
 
 ### Frontmatter schema
 
-- **cli_preference**: string[] (required)  
-  Ordered list of review CLI tools to try (e.g. `gemini`, `codex`, `claude`). The runner selects the first available tools from this list until `num_reviews` is satisfied.
+- **cli_preference**: string[] (optional)  
+  Ordered list of review CLI tools to try (e.g. `gemini`, `codex`, `claude`). If omitted, the project-level `cli.default_preference` is used.
 - **num_reviews**: number (default: `1`)  
   How many tools to run for this review gate. If greater than 1, multiple CLIs are executed and the gate fails if any of them fail pass/fail evaluation.
 - **parallel**: boolean (default: `true`)  

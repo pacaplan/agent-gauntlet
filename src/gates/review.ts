@@ -62,7 +62,8 @@ export class ReviewGateExecutor {
     loggerFactory: (adapterName?: string) => Promise<(output: string) => Promise<void>>,
     baseBranch: string,
     previousFailures?: Map<string, PreviousViolation[]>,
-    changeOptions?: { commit?: string; uncommitted?: boolean }
+    changeOptions?: { commit?: string; uncommitted?: boolean },
+    checkUsageLimit: boolean = false
   ): Promise<GateResult> {
     const startTime = Date.now();
     const mainLogger = await loggerFactory();
@@ -106,7 +107,7 @@ export class ReviewGateExecutor {
             batch.map(async (toolName) => {
               const adapter = getAdapter(toolName);
               if (!adapter) return { toolName, status: 'missing' as const };
-              const health = await adapter.checkHealth();
+              const health = await adapter.checkHealth({ checkUsageLimit });
               return { toolName, ...health };
             })
           );
@@ -137,7 +138,7 @@ export class ReviewGateExecutor {
 
         const results = await Promise.all(
           selectedAdapters.map((toolName) =>
-            this.runSingleReview(toolName, config, diff, loggerFactory, mainLogger, previousFailures, true)
+            this.runSingleReview(toolName, config, diff, loggerFactory, mainLogger, previousFailures, true, checkUsageLimit)
           )
         );
 
@@ -151,7 +152,7 @@ export class ReviewGateExecutor {
         // Sequential Execution Logic
         for (const toolName of preferences) {
           if (usedAdapters.size >= required) break;
-          const res = await this.runSingleReview(toolName, config, diff, loggerFactory, mainLogger, previousFailures);
+          const res = await this.runSingleReview(toolName, config, diff, loggerFactory, mainLogger, previousFailures, false, checkUsageLimit);
           if (res) {
             outputs.push({ adapter: res.adapter, ...res.evaluation });
             usedAdapters.add(res.adapter);
@@ -211,13 +212,14 @@ export class ReviewGateExecutor {
     loggerFactory: (adapterName?: string) => Promise<(output: string) => Promise<void>>,
     mainLogger: (output: string) => Promise<void>,
     previousFailures?: Map<string, PreviousViolation[]>,
-    skipHealthCheck: boolean = false
+    skipHealthCheck: boolean = false,
+    checkUsageLimit: boolean = false
   ): Promise<{ adapter: string; evaluation: { status: 'pass' | 'fail' | 'error'; message: string; json?: any } } | null> {
     const adapter = getAdapter(toolName);
     if (!adapter) return null;
 
     if (!skipHealthCheck) {
-      const health = await adapter.checkHealth();
+      const health = await adapter.checkHealth({ checkUsageLimit });
       if (health.status === 'missing') return null;
       if (health.status === 'unhealthy') {
         await mainLogger(`Skipping ${adapter.name}: ${health.message || 'Unhealthy'}\n`);
