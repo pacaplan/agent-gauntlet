@@ -27,9 +27,8 @@ export class ClaudeAdapter implements CLIAdapter {
     }
 
     try {
-      // Try a lightweight command to check if we're rate limited
-      // We use a simple "hello" prompt to avoid "No messages returned" errors from empty input
-      const { stdout, stderr } = await execAsync('echo "hello" | claude -p --max-turns 1', { timeout: 10000 });
+      // Try a lightweight command to check availability
+      const { stdout, stderr } = await execAsync('claude --version', { timeout: 10000 });
       
       const combined = (stdout || '') + (stderr || '');
       if (this.isUsageLimit(combined)) {

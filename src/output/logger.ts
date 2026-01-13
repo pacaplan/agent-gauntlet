@@ -41,15 +41,10 @@ export class Logger {
     return async (text: string) => {
       const timestamp = formatTimestamp();
       const lines = text.split('\n');
-      const output: string[] = [];
-      for (const line of lines) {
-        if (line.trim()) {
-          output.push(`[${timestamp}] ${line}`);
-        }
+      if (lines.length > 0) {
+        lines[0] = `[${timestamp}] ${lines[0]}`;
       }
-      if (output.length > 0) {
-        await fs.appendFile(logPath, output.join('\n') + '\n');
-      }
+      await fs.appendFile(logPath, lines.join('\n') + (text.endsWith('\n') ? '' : '\n'));
     };
   }
 
@@ -61,15 +56,10 @@ export class Logger {
       return async (text: string) => {
         const timestamp = formatTimestamp();
         const lines = text.split('\n');
-        const output: string[] = [];
-        for (const line of lines) {
-          if (line.trim()) {
-            output.push(`[${timestamp}] ${line}`);
-          }
+        if (lines.length > 0) {
+          lines[0] = `[${timestamp}] ${lines[0]}`;
         }
-        if (output.length > 0) {
-          await fs.appendFile(logPath, output.join('\n') + '\n');
-        }
+        await fs.appendFile(logPath, lines.join('\n') + (text.endsWith('\n') ? '' : '\n'));
       };
     };
   }

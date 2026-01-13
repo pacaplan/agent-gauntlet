@@ -108,7 +108,6 @@ export class ReviewGateExecutor {
 
         try {
           const startMsg = `[START] review:.:${config.name} (${adapter.name})`;
-          console.log(startMsg);
           await adapterLogger(`${startMsg}\n`);
 
           const adapterPreviousViolations = previousFailures?.get(adapter.name) || [];
@@ -227,8 +226,6 @@ export class ReviewGateExecutor {
         message = `Failed (${failed.adapter}): ${failed.message}`;
       }
 
-      await mainLogger(`Result: ${status} - ${message}\n`);
-
       return {
         jobId,
         status,
@@ -237,7 +234,6 @@ export class ReviewGateExecutor {
       };
     } catch (error: any) {
       await mainLogger(`Critical Error: ${error.message}\n`);
-      await mainLogger('Result: error\n');
       return {
         jobId,
         status: 'error',
