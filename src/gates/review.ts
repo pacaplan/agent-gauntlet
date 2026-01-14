@@ -3,7 +3,9 @@ import { promisify } from 'node:util';
 import { ReviewGateConfig, ReviewPromptFrontmatter } from '../config/types.js';
 import { GateResult } from './result.js';
 import { CLIAdapter, getAdapter } from '../cli-adapters/index.js';
-import { PreviousViolation } from '../utils/log-parser.js';
+import { Logger } from '../output/logger.js';
+import { parseDiff, isValidViolationLocation, type DiffFileRange } from '../utils/diff-parser.js';
+import { type PreviousViolation } from '../utils/log-parser.js';
 
 const execAsync = promisify(exec);
 
@@ -13,8 +15,16 @@ const JSON_SYSTEM_INSTRUCTION = `
 You are in a read-only mode. You may read files in the repository to gather context.
 Do NOT attempt to modify files or run shell commands that change system state.
 Do NOT access files outside the repository root.
+Do NOT access the .git/ directory or read git history/commit information.
 Use your available file-reading and search tools to find information.
 If the diff is insufficient or ambiguous, use your tools to read the full file content or related files.
+
+CRITICAL SCOPE RESTRICTIONS:
+- ONLY review the code changes shown in the diff below
+- DO NOT review commit history or existing code outside the diff
+- All violations MUST reference file paths and line numbers that appear IN THE DIFF
+- The "file" field must match a file from the diff
+- The "line" field must be within a changed region (lines starting with + in the diff)
 
 IMPORTANT: You must output ONLY a valid JSON object. Do not output any markdown text, explanations, or code blocks outside of the JSON.
 Each violation MUST include a "priority" field with one of: "critical", "high", "medium", "low".
@@ -246,7 +256,11 @@ export class ReviewGateExecutor {
 
       await adapterLogger(`\n--- Review Output (${adapter.name}) ---\n${output}\n`);
 
-      const evaluation = this.evaluateOutput(output);
+      const evaluation = this.evaluateOutput(output, diff);
+
+      if (evaluation.filteredCount && evaluation.filteredCount > 0) {
+        await adapterLogger(`Note: ${evaluation.filteredCount} out-of-scope violations filtered\n`);
+      }
 
       // Log formatted summary
       if (evaluation.json) {
@@ -408,14 +422,21 @@ export class ReviewGateExecutor {
     return lines.join('\n');
   }
 
-  public evaluateOutput(output: string): { status: 'pass' | 'fail' | 'error'; message: string; json?: any } {
+  public evaluateOutput(output: string, diff?: string): { 
+    status: 'pass' | 'fail' | 'error'; 
+    message: string; 
+    json?: any;
+    filteredCount?: number;
+  } {
+    const diffRanges = diff ? parseDiff(diff) : undefined;
+
     try {
       // 1. Try to extract from markdown code block first (most reliable)
       const jsonBlockMatch = output.match(/```json\s*([\s\S]*?)\s*```/);
       if (jsonBlockMatch) {
         try {
           const json = JSON.parse(jsonBlockMatch[1]);
-          return this.validateAndReturn(json);
+          return this.validateAndReturn(json, diffRanges);
         } catch {
           // If code block parse fails, fall back to other methods
         }
@@ -433,7 +454,7 @@ export class ReviewGateExecutor {
             const json = JSON.parse(candidate);
             // If we successfully parsed an object with 'status', it's likely our result
             if (json.status) {
-              return this.validateAndReturn(json);
+              return this.validateAndReturn(json, diffRanges);
             }
           } catch {
             // Not valid JSON, keep searching backwards
@@ -448,7 +469,7 @@ export class ReviewGateExecutor {
          try {
             const candidate = output.substring(firstStart, end + 1);
             const json = JSON.parse(candidate);
-            return this.validateAndReturn(json);
+            return this.validateAndReturn(json, diffRanges);
          } catch {
              // Ignore
          }
@@ -461,7 +482,10 @@ export class ReviewGateExecutor {
     }
   }
 
-  private validateAndReturn(json: any): { status: 'pass' | 'fail' | 'error'; message: string; json?: any } {
+  private validateAndReturn(
+    json: any,
+    diffRanges?: Map<string, DiffFileRange>
+  ): { status: 'pass' | 'fail' | 'error'; message: string; json?: any; filteredCount?: number } {
       // Validate Schema
       if (!json.status || (json.status !== 'pass' && json.status !== 'fail')) {
          return { status: 'error', message: 'Invalid JSON: missing or invalid "status" field', json };
@@ -472,6 +496,33 @@ export class ReviewGateExecutor {
       }
 
       // json.status === 'fail'
+      let filteredCount = 0;
+
+      if (Array.isArray(json.violations) && diffRanges?.size) {
+        const originalCount = json.violations.length;
+
+        json.violations = json.violations.filter((v: any) => {
+          const isValid = isValidViolationLocation(v.file, v.line, diffRanges);
+          if (!isValid) {
+            // Can't easily access logger here, but could return warning info
+            // console.warn(`[WARNING] Filtered violation: ${v.file}:${v.line ?? '?'} (not in diff)`);
+          }
+          return isValid;
+        });
+
+        filteredCount = originalCount - json.violations.length;
+
+        // If all filtered out, change to pass
+        if (json.violations.length === 0) {
+          return {
+            status: 'pass',
+            message: `Passed (${filteredCount} out-of-scope violations filtered)`,
+            json: { status: 'pass' },
+            filteredCount
+          };
+        }
+      }
+
       const violationCount = Array.isArray(json.violations) ? json.violations.length : 'some';
       
       // Construct a summary message
@@ -481,7 +532,7 @@ export class ReviewGateExecutor {
           msg += `. Example: ${first.issue} in ${first.file}`;
       }
       
-      return { status: 'fail', message: msg, json };
+      return { status: 'fail', message: msg, json, filteredCount };
   }
 
   private parseLines(stdout: string): string[] {

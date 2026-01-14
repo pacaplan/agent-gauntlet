@@ -145,6 +145,7 @@ if (evaluation.filteredCount && evaluation.filteredCount > 0) {
 |------|---------|
 | `src/gates/review.ts` | Update prompt, modify evaluateOutput/validateAndReturn signatures, add filtering |
 | `src/utils/diff-parser.ts` | **NEW** - Diff parsing utility |
+| `src/utils/diff-parser.test.ts` | **NEW** - Unit tests for diff parser |
 
 ---
 

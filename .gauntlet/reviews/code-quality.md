@@ -1,9 +1,3 @@
----
-num_reviews: 2
-parallel: true
-
----
-
 # Code Review
 
 Review the diff for code quality issues. Focus on:
