@@ -1,10 +1,40 @@
-import { describe, it, expect, beforeEach, afterEach, beforeAll, afterAll } from 'bun:test';
+import { describe, it, expect, beforeEach, afterEach, beforeAll, afterAll, mock } from 'bun:test';
 import { Command } from 'commander';
-import { registerInitCommand } from './init.js';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 
 const TEST_DIR = path.join(process.cwd(), 'test-init-' + Date.now());
+
+// Mock adapters
+const mockAdapters = [
+  {
+    name: 'mock-cli-1',
+    isAvailable: async () => true,
+    getProjectCommandDir: () => '.mock1',
+    getUserCommandDir: () => null,
+    getCommandExtension: () => '.sh',
+    canUseSymlink: () => false,
+    transformCommand: (content: string) => content,
+  },
+  {
+    name: 'mock-cli-2',
+    isAvailable: async () => false, // Not available
+    getProjectCommandDir: () => '.mock2',
+    getUserCommandDir: () => null,
+    getCommandExtension: () => '.sh',
+    canUseSymlink: () => false,
+    transformCommand: (content: string) => content,
+  }
+];
+
+mock.module('../cli-adapters/index.js', () => ({
+  getAllAdapters: () => mockAdapters,
+  getProjectCommandAdapters: () => mockAdapters,
+  getUserCommandAdapters: () => [],
+}));
+
+// Import after mocking
+const { registerInitCommand } = await import('./init.js');
 
 describe('Init Command', () => {
   let program: Command;
@@ -45,50 +75,33 @@ describe('Init Command', () => {
   });
 
   it('should create .gauntlet directory structure with --yes flag', async () => {
-    const initCmd = program.commands.find(cmd => cmd.name() === 'init');
+    // We expect it to use the available mock-cli-1
+    await program.parseAsync(['node', 'test', 'init', '--yes']);
+      
+    // Check that files were created
+    const gauntletDir = path.join(TEST_DIR, '.gauntlet');
+    const configFile = path.join(gauntletDir, 'config.yml');
+    const reviewsDir = path.join(gauntletDir, 'reviews');
+    const checksDir = path.join(gauntletDir, 'checks');
+    const runGauntletFile = path.join(gauntletDir, 'run_gauntlet.md');
     
-    // Use a timeout to prevent hanging if prompts occur
-    let timeoutId: ReturnType<typeof setTimeout> | undefined;
-    const testPromise = initCmd?.parseAsync(['init', '--yes']);
-    const timeoutPromise = new Promise((_, reject) => {
-      timeoutId = setTimeout(() => reject(new Error('Test timed out - init command may be prompting')), 3000);
-    });
+    expect(await fs.stat(gauntletDir)).toBeDefined();
+    expect(await fs.stat(configFile)).toBeDefined();
+    expect(await fs.stat(reviewsDir)).toBeDefined();
+    expect(await fs.stat(checksDir)).toBeDefined();
+    expect(await fs.stat(runGauntletFile)).toBeDefined();
     
-    try {
-      await Promise.race([testPromise, timeoutPromise]);
-      
-      // Check that files were created
-      const gauntletDir = path.join(TEST_DIR, '.gauntlet');
-      const configFile = path.join(gauntletDir, 'config.yml');
-      const reviewsDir = path.join(gauntletDir, 'reviews');
-      const checksDir = path.join(gauntletDir, 'checks');
-      const runGauntletFile = path.join(gauntletDir, 'run_gauntlet.md');
-      
-      expect(await fs.stat(gauntletDir)).toBeDefined();
-      expect(await fs.stat(configFile)).toBeDefined();
-      expect(await fs.stat(reviewsDir)).toBeDefined();
-      expect(await fs.stat(checksDir)).toBeDefined();
-      expect(await fs.stat(runGauntletFile)).toBeDefined();
-      
-      // Verify config content
-      const configContent = await fs.readFile(configFile, 'utf-8');
-      expect(configContent).toContain('base_branch');
-      expect(configContent).toContain('log_dir');
-      
-      // Verify review file content
-      const reviewFile = path.join(reviewsDir, 'code-quality.md');
-      const reviewContent = await fs.readFile(reviewFile, 'utf-8');
-      expect(reviewContent).toContain('cli_preference');
-    } catch (error: any) {
-      // If it times out, skip this test for now - the command installation part may need more complex mocking
-      if (error.message.includes('timed out')) {
-        console.log('Skipping test due to interactive prompt - command installation requires manual testing');
-        return;
-      }
-      throw error;
-    } finally {
-      if (timeoutId) clearTimeout(timeoutId);
-    }
+    // Verify config content
+    const configContent = await fs.readFile(configFile, 'utf-8');
+    expect(configContent).toContain('base_branch');
+    expect(configContent).toContain('log_dir');
+    expect(configContent).toContain('mock-cli-1'); // Should be present
+    expect(configContent).not.toContain('mock-cli-2'); // Should not be present (unavailable)
+    
+    // Verify review file content
+    const reviewFile = path.join(reviewsDir, 'code-quality.md');
+    const reviewContent = await fs.readFile(reviewFile, 'utf-8');
+    expect(reviewContent).toContain('mock-cli-1');
   });
 
   it('should not create directory if .gauntlet already exists', async () => {
@@ -96,8 +109,7 @@ describe('Init Command', () => {
     const gauntletDir = path.join(TEST_DIR, '.gauntlet');
     await fs.mkdir(gauntletDir, { recursive: true });
     
-    const initCmd = program.commands.find(cmd => cmd.name() === 'init');
-    await initCmd?.parseAsync(['init', '--yes']);
+    await program.parseAsync(['node', 'test', 'init', '--yes']);
     
     const output = logs.join('\n');
     expect(output).toContain('.gauntlet directory already exists');

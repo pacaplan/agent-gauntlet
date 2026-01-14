@@ -7,7 +7,8 @@ import { JobGenerator } from '../core/job.js';
 import { Runner } from '../core/runner.js';
 import { Logger } from '../output/logger.js';
 import { ConsoleReporter } from '../output/console.js';
-import { findPreviousFailures, GateFailures, PreviousViolation } from '../utils/log-parser.js';
+import { findPreviousFailures, type GateFailures, type PreviousViolation } from '../utils/log-parser.js';
+import { rotateLogs } from './shared.js';
 
 export function registerRerunCommand(program: Command): void {
   program
@@ -50,6 +51,9 @@ export function registerRerunCommand(program: Command): void {
         } else {
           console.log(chalk.dim('No previous failures found. Running as normal...'));
         }
+
+        // Rotate logs before starting the new run
+        await rotateLogs(config.project.log_dir);
 
         // Detect changes (default to uncommitted unless --commit is specified)
         // Note: Rerun defaults to uncommitted changes for faster iteration loops,

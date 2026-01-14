@@ -7,6 +7,7 @@ import { JobGenerator } from '../core/job.js';
 import { Runner } from '../core/runner.js';
 import { Logger } from '../output/logger.js';
 import { ConsoleReporter } from '../output/console.js';
+import { rotateLogs } from './shared.js';
 
 export function registerReviewCommand(program: Command): void {
   program
@@ -18,6 +19,10 @@ export function registerReviewCommand(program: Command): void {
     .action(async (options) => {
       try {
         const config = await loadConfig();
+
+        // Rotate logs before starting
+        await rotateLogs(config.project.log_dir);
+
         const changeDetector = new ChangeDetector(config.project.base_branch, {
           commit: options.commit,
           uncommitted: options.uncommitted
