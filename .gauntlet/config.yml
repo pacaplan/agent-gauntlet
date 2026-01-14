@@ -13,3 +13,6 @@ entry_points:
       - test
     reviews:
       - code-quality
+  - path: "docs/plans"
+    reviews:
+      - plan-review
