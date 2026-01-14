@@ -8,7 +8,7 @@ cli:
     - gemini
   check_usage_limit: false
 entry_points:
-  - path: "."
+  - path: "src"
     checks:
       - test
     reviews:

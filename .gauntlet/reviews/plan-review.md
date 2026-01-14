@@ -1,8 +1,8 @@
 ---
 cli_preference:
-  - codex
   - gemini
-num_reviews: 2
+  - codex
+num_reviews: 1
 ---
 
 # Plan Review

@@ -4,10 +4,9 @@
 When running `rerun`, Gemini reviewed git commit history and commented on files/lines NOT in the diff. This is incorrect behavior - reviews should only comment on the actual changes.
 
 ## Solution Overview
-Three layers of defense:
+Two layers of defense:
 1. **Prompt-level**: Explicit instructions prohibiting .git/ access and restricting comments to diff lines
-2. **Code-level**: Add .git/ to blocked paths where possible
-3. **Fail-safe filtering**: Post-process violations to remove any referencing files/lines not in diff
+2. **Fail-safe filtering (Code-level)**: Post-process violations to strictly enforce that all comments map to changed lines in the provided diff, effectively blocking comments on .git/ or outside context.
 
 ---
 
@@ -40,6 +39,7 @@ Create a utility that:
 - Parses unified diff format
 - Extracts map of `filename → Set<validLineNumbers>`
 - Handles edge cases: new files, deleted files, renamed files
+- Exports type `DiffFileRange = Set<number>`
 - Exports `parseDiff(diff: string): Map<string, DiffFileRange>`
 - Exports `isValidViolationLocation(file, line, diffRanges): boolean`
 
@@ -47,8 +47,8 @@ Key logic:
 - Parse `diff --git a/... b/...` headers for filenames
 - Parse `@@ -old,count +new,count @@` hunk headers for line tracking
 - Track lines starting with `+` as valid comment targets
-- For new files, accept any positive line number
 - For deleted files, reject all violations (nothing to comment on)
+- Explicitly reject any file path starting with `.git/`
 
 ### Step 3: Modify `evaluateOutput` to filter violations
 
@@ -56,7 +56,7 @@ Key logic:
 
 3a. Add import at top:
 ```typescript
-import { parseDiff, isValidViolationLocation } from '../utils/diff-parser.js';
+import { parseDiff, isValidViolationLocation, type DiffFileRange } from '../utils/diff-parser.js';
 ```
 
 3b. Update `evaluateOutput` signature (line 411):
