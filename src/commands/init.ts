@@ -6,6 +6,8 @@ import readline from 'node:readline';
 import { exists } from './shared.js';
 import { getAllAdapters, getProjectCommandAdapters, getUserCommandAdapters, type CLIAdapter } from '../cli-adapters/index.js';
 
+const MAX_PROMPT_ATTEMPTS = 10;
+
 const GAUNTLET_COMMAND_CONTENT = `---
 description: Run the full verification gauntlet
 allowed-tools: Bash
@@ -197,7 +199,10 @@ async function promptForConfig(availableAdapters: CLIAdapter[]): Promise<InitCon
     console.log(`  ${availableAdapters.length + 1}) All`);
 
     let selectedAdapters: CLIAdapter[] = [];
+    let attempts = 0;
     while (true) {
+      attempts++;
+      if (attempts > MAX_PROMPT_ATTEMPTS) throw new Error('Too many invalid attempts');
       const answer = await question(`(comma-separated, e.g., 1,2): `);
       const selections = answer.split(',').map(s => s.trim()).filter(s => s);
       
@@ -274,8 +279,7 @@ function generateConfigYml(config: InitConfig): string {
   
   // If we have checks, we need a source directory entry point
   if (config.lintCmd !== null || config.testCmd !== null) {
-    entryPoints += `  # Only included if user selected checks:
-  - path: "${config.sourceDir}"
+    entryPoints += `  - path: "${config.sourceDir}"
     checks:\n`;
     if (config.lintCmd !== null) entryPoints += `      - lint\n`;
     if (config.testCmd !== null) entryPoints += `      - unit-tests\n`;
@@ -335,8 +339,12 @@ async function promptAndInstallCommands(projectRoot: string, canonicalCommandPat
 
     let installLevel: InstallLevel = 'none';
     let answer = await question('Select option [1-3]: ');
+    let installLevelAttempts = 0;
 
     while (true) {
+      installLevelAttempts++;
+      if (installLevelAttempts > MAX_PROMPT_ATTEMPTS) throw new Error('Too many invalid attempts');
+
       if (answer === '1') {
         installLevel = 'none';
         break;
@@ -379,8 +387,12 @@ async function promptAndInstallCommands(projectRoot: string, canonicalCommandPat
 
     let selectedAgents: string[] = [];
     answer = await question(`Select options (comma-separated, e.g., 1,2 or ${installableAdapters.length + 1} for all): `);
+    let agentSelectionAttempts = 0;
     
     while (true) {
+      agentSelectionAttempts++;
+      if (agentSelectionAttempts > MAX_PROMPT_ATTEMPTS) throw new Error('Too many invalid attempts');
+
       const selections = answer.split(',').map(s => s.trim()).filter(s => s);
       
       if (selections.length === 0) {

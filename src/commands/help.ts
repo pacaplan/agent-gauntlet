@@ -11,6 +11,7 @@ export function registerHelpCommand(program: Command): void {
       console.log('of your repo that changed, based on a configurable set of entry points.\n');
       console.log(chalk.bold('Commands:\n'));
       console.log('  run      Run gates for detected changes');
+      console.log('  rerun    Rerun gates with previous failure context');
       console.log('  check    Run only applicable checks');
       console.log('  review   Run only applicable reviews');
       console.log('  detect   Show what gates would run (without executing them)');
