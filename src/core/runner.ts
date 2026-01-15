@@ -66,18 +66,19 @@ export class Runner {
     if (this.shouldStop) return;
 
     this.reporter.onJobStart(job);
-    const logPath = this.logger.getLogPath(job.id);
-    const jobLogger = await this.logger.createJobLogger(job.id);
     
     let result: GateResult;
 
     if (job.type === 'check') {
+      const logPath = this.logger.getLogPath(job.id);
+      const jobLogger = await this.logger.createJobLogger(job.id);
       result = await this.checkExecutor.execute(
         job.id,
         job.gateConfig as any,
         job.workingDirectory,
         jobLogger
       );
+      result.logPath = logPath;
     } else {
       // Use sanitized Job ID for lookup because that's what log-parser uses (based on filenames)
       const safeJobId = sanitizeJobId(job.id);
@@ -95,7 +96,6 @@ export class Runner {
       );
     }
 
-    result.logPath = logPath;
     this.results.push(result);
     this.reporter.onJobComplete(job, result);
 
@@ -159,15 +159,24 @@ export class Runner {
   }
 
   private async recordPreflightFailure(job: Job, message: string): Promise<GateResult> {
-    const logPath = this.logger.getLogPath(job.id);
-    const jobLogger = await this.logger.createJobLogger(job.id);
-    await jobLogger(`[${new Date().toISOString()}] Health check failed\n${message}\n`);
+    if (job.type === 'check') {
+      const logPath = this.logger.getLogPath(job.id);
+      const jobLogger = await this.logger.createJobLogger(job.id);
+      await jobLogger(`[${new Date().toISOString()}] Health check failed\n${message}\n`);
+      return {
+        jobId: job.id,
+        status: 'error',
+        duration: 0,
+        message,
+        logPath
+      };
+    }
+
     return {
       jobId: job.id,
       status: 'error',
       duration: 0,
-      message,
-      logPath
+      message
     };
   }
 

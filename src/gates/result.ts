@@ -6,4 +6,5 @@ export interface GateResult {
   duration: number; // ms
   message?: string; // summary message
   logPath?: string; // path to full log
+  logPaths?: string[]; // paths to multiple logs (e.g. per-agent logs)
 }

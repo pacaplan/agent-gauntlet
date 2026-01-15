@@ -48,12 +48,12 @@ export class Logger {
     };
   }
 
-  createLoggerFactory(jobId: string): (adapterName?: string) => Promise<(text: string) => Promise<void>> {
+  createLoggerFactory(jobId: string): (adapterName?: string) => Promise<{ logger: (text: string) => Promise<void>; logPath: string }> {
     return async (adapterName?: string) => {
       const logPath = this.getLogPath(jobId, adapterName);
       await this.initFile(logPath);
 
-      return async (text: string) => {
+      const logger = async (text: string) => {
         const timestamp = formatTimestamp();
         const lines = text.split('\n');
         if (lines.length > 0) {
@@ -61,6 +61,8 @@ export class Logger {
         }
         await fs.appendFile(logPath, lines.join('\n') + (text.endsWith('\n') ? '' : '\n'));
       };
+
+      return { logger, logPath };
     };
   }
 }

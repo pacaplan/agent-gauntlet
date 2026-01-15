@@ -10,6 +10,7 @@ import { type PreviousViolation } from '../utils/log-parser.js';
 const execAsync = promisify(exec);
 
 const MAX_BUFFER_BYTES = 10 * 1024 * 1024;
+const MAX_LOG_BUFFER_SIZE = 10000;
 
 const JSON_SYSTEM_INSTRUCTION = `
 You are in a read-only mode. You may read files in the repository to gather context.
@@ -69,14 +70,64 @@ export class ReviewGateExecutor {
     jobId: string,
     config: ReviewConfig,
     entryPointPath: string,
-    loggerFactory: (adapterName?: string) => Promise<(output: string) => Promise<void>>,
+    loggerFactory: (adapterName?: string) => Promise<{ logger: (output: string) => Promise<void>; logPath: string }>,
     baseBranch: string,
     previousFailures?: Map<string, PreviousViolation[]>,
     changeOptions?: { commit?: string; uncommitted?: boolean },
     checkUsageLimit: boolean = false
   ): Promise<GateResult> {
     const startTime = Date.now();
-    const mainLogger = await loggerFactory();
+    const logBuffer: string[] = [];
+    let logSequence = 0; // Monotonic counter for dedup
+    const activeLoggers: Array<(output: string, index: number) => Promise<void>> = [];
+    const logPaths: string[] = [];
+    const logPathsSet = new Set<string>(); // O(1) lookup
+
+    const mainLogger = async (output: string) => {
+      const seq = logSequence++;
+      // Atomic length check and push
+      // We check length directly on the array property to ensure we use the current value.
+      // Even if we exceed the limit slightly due to concurrency (impossible in single-threaded JS),
+      // it's a soft limit.
+      if (logBuffer.length < MAX_LOG_BUFFER_SIZE) {
+        logBuffer.push(output);
+      }
+      // Use allSettled to prevent failures from stopping the main logger
+      await Promise.allSettled(activeLoggers.map(l => l(output, seq)));
+    };
+
+    const getAdapterLogger = async (adapterName: string) => {
+      const { logger, logPath } = await loggerFactory(adapterName);
+      if (!logPathsSet.has(logPath)) {
+        logPathsSet.add(logPath);
+        logPaths.push(logPath);
+      }
+
+      // Robust synchronization using index tracking.
+      // We add the logger to activeLoggers FIRST to catch all future messages.
+      // We also flush the buffer.
+      // We use 'seenIndices' to prevent duplicates if a message arrives via both paths
+      // (e.g. added to buffer and sent to activeLoggers simultaneously).
+      // This acts as the atomic counter mechanism requested to safely handle race conditions.
+      // Even if mainLogger pushes to buffer and calls activeLoggers during the snapshot flush,
+      // seenIndices will prevent double logging.
+      const seenIndices = new Set<number>();
+      
+      const safeLogger = async (msg: string, index: number) => {
+        if (seenIndices.has(index)) return;
+        seenIndices.add(index);
+        await logger(msg);
+      };
+
+      activeLoggers.push(safeLogger);
+      
+      // Flush existing buffer
+      const snapshot = [...logBuffer];
+      // We pass the loop index 'i' which corresponds to the buffer index
+      await Promise.all(snapshot.map((msg, i) => safeLogger(msg, i)));
+      
+      return logger;
+    };
 
     try {
       await mainLogger(`Starting review: ${config.name}\n`);
@@ -91,7 +142,8 @@ export class ReviewGateExecutor {
           jobId,
           status: 'pass',
           duration: Date.now() - startTime,
-          message: 'No changes to review'
+          message: 'No changes to review',
+          logPaths
         };
       }
 
@@ -138,7 +190,8 @@ export class ReviewGateExecutor {
             jobId,
             status: 'error',
             duration: Date.now() - startTime,
-            message: msg
+            message: msg,
+            logPaths
           };
         }
 
@@ -148,7 +201,7 @@ export class ReviewGateExecutor {
 
         const results = await Promise.all(
           selectedAdapters.map((toolName) =>
-            this.runSingleReview(toolName, config, diff, loggerFactory, mainLogger, previousFailures, true, checkUsageLimit)
+            this.runSingleReview(toolName, config, diff, getAdapterLogger, mainLogger, previousFailures, true, checkUsageLimit)
           )
         );
 
@@ -162,7 +215,7 @@ export class ReviewGateExecutor {
         // Sequential Execution Logic
         for (const toolName of preferences) {
           if (usedAdapters.size >= required) break;
-          const res = await this.runSingleReview(toolName, config, diff, loggerFactory, mainLogger, previousFailures, false, checkUsageLimit);
+          const res = await this.runSingleReview(toolName, config, diff, getAdapterLogger, mainLogger, previousFailures, false, checkUsageLimit);
           if (res) {
             outputs.push({ adapter: res.adapter, ...res.evaluation });
             usedAdapters.add(res.adapter);
@@ -177,7 +230,8 @@ export class ReviewGateExecutor {
           jobId,
           status: 'error',
           duration: Date.now() - startTime,
-          message: msg
+          message: msg,
+          logPaths
         };
       }
 
@@ -201,7 +255,8 @@ export class ReviewGateExecutor {
         jobId,
         status,
         duration: Date.now() - startTime,
-        message
+        message,
+        logPaths
       };
     } catch (error: any) {
       await mainLogger(`Critical Error: ${error.message}\n`);
@@ -210,7 +265,8 @@ export class ReviewGateExecutor {
         jobId,
         status: 'error',
         duration: Date.now() - startTime,
-        message: error.message
+        message: error.message,
+        logPaths
       };
     }
   }
@@ -219,7 +275,7 @@ export class ReviewGateExecutor {
     toolName: string,
     config: ReviewConfig,
     diff: string,
-    loggerFactory: (adapterName?: string) => Promise<(output: string) => Promise<void>>,
+    getAdapterLogger: (adapterName: string) => Promise<(output: string) => Promise<void>>,
     mainLogger: (output: string) => Promise<void>,
     previousFailures?: Map<string, PreviousViolation[]>,
     skipHealthCheck: boolean = false,
@@ -238,7 +294,7 @@ export class ReviewGateExecutor {
     }
 
     // Create per-adapter logger
-    const adapterLogger = await loggerFactory(adapter.name);
+    const adapterLogger = await getAdapterLogger(adapter.name);
 
     try {
       const startMsg = `[START] review:.:${config.name} (${adapter.name})`;
