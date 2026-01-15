@@ -1,0 +1,3 @@
+[install]
+# Force Bun to use the public npm registry
+registry = "https://registry.npmjs.org"
