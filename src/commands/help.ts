@@ -1,25 +1,33 @@
-import type { Command } from 'commander';
-import chalk from 'chalk';
+import chalk from "chalk";
+import type { Command } from "commander";
 
 export function registerHelpCommand(program: Command): void {
-  program
-    .command('help')
-    .description('Show help information')
-    .action(() => {
-      console.log(chalk.bold('Agent Gauntlet - AI-assisted quality gates\n'));
-      console.log('Agent Gauntlet runs quality gates (checks + AI reviews) for only the parts');
-      console.log('of your repo that changed, based on a configurable set of entry points.\n');
-      console.log(chalk.bold('Commands:\n'));
-      console.log('  run      Run gates for detected changes');
-      console.log('  rerun    Rerun gates with previous failure context');
-      console.log('  check    Run only applicable checks');
-      console.log('  review   Run only applicable reviews');
-      console.log('  detect   Show what gates would run (without executing them)');
-      console.log('  list     List configured gates');
-      console.log('  health   Check CLI tool availability');
-      console.log('  init     Initialize .gauntlet configuration');
-      console.log('  help     Show this help message\n');
-      console.log('For more information, see: https://github.com/your-repo/agent-gauntlet');
-      console.log('Or run: agent-gauntlet <command> --help');
-    });
+	program
+		.command("help")
+		.description("Show help information")
+		.action(() => {
+			console.log(chalk.bold("Agent Gauntlet - AI-assisted quality gates\n"));
+			console.log(
+				"Agent Gauntlet runs quality gates (checks + AI reviews) for only the parts",
+			);
+			console.log(
+				"of your repo that changed, based on a configurable set of entry points.\n",
+			);
+			console.log(chalk.bold("Commands:\n"));
+			console.log("  run      Run gates for detected changes");
+			console.log("  rerun    Rerun gates with previous failure context");
+			console.log("  check    Run only applicable checks");
+			console.log("  review   Run only applicable reviews");
+			console.log(
+				"  detect   Show what gates would run (without executing them)",
+			);
+			console.log("  list     List configured gates");
+			console.log("  health   Check CLI tool availability");
+			console.log("  init     Initialize .gauntlet configuration");
+			console.log("  help     Show this help message\n");
+			console.log(
+				"For more information, see: https://github.com/your-repo/agent-gauntlet",
+			);
+			console.log("Or run: agent-gauntlet <command> --help");
+		});
 }

@@ -11,8 +11,13 @@ entry_points:
   - path: "src"
     checks:
       - test
+      - lint
+      - security-code
     reviews:
       - code-quality
+  - path: "package.json"
+    checks:
+      - security-deps
   - path: "docs/plans"
     reviews:
       - plan-review

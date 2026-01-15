@@ -47,6 +47,7 @@ cli_preference:
   - gemini
   - codex
   - claude
+  - github-copilot
 num_reviews: 1
 pass_pattern: "PASS|No issues"
 ---
@@ -149,7 +150,7 @@ Prints:
 
 ### `agent-gauntlet health`
 
-Checks availability of supported review CLIs (`gemini`, `codex`, `claude`).
+Checks availability of supported review CLIs (`gemini`, `codex`, `claude`, `github-copilot`).
 
 ### `agent-gauntlet init`
 
@@ -359,4 +360,4 @@ Each job writes a log file under `log_dir` (default: `.gauntlet_logs/`), includi
 - **“Configuration file not found”**: ensure `.gauntlet/config.yml` exists (or run `agent-gauntlet init`).
 - **No gates run**: either no changes were detected, or no entry point matched those changes, or the matching entry point has no gates.
 - **Check gate shows “Missing command” in preflight**: the first token of `command` must resolve on `PATH` (or be an executable path).
-- **Review gate shows “Missing CLI tools”**: install one of the requested tools (`gemini`, `codex`, `claude`) and ensure it’s on `PATH`.
+- **Review gate shows "Missing CLI tools"**: install one of the requested tools (`gemini`, `codex`, `claude`, `github-copilot`) and ensure it's on `PATH`.

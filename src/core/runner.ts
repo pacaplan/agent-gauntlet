@@ -1,235 +1,266 @@
-import { exec } from 'node:child_process';
-import { promisify } from 'node:util';
-import fs from 'node:fs/promises';
-import { constants as fsConstants } from 'node:fs';
-import path from 'node:path';
-import { Job } from './job.js';
-import { CheckGateExecutor } from '../gates/check.js';
-import { ReviewGateExecutor } from '../gates/review.js';
-import { Logger } from '../output/logger.js';
-import { ConsoleReporter } from '../output/console.js';
-import { GateResult } from '../gates/result.js';
-import { LoadedConfig, ReviewGateConfig, ReviewPromptFrontmatter } from '../config/types.js';
-import { getAdapter } from '../cli-adapters/index.js';
-import { PreviousViolation } from '../utils/log-parser.js';
-import { sanitizeJobId } from '../utils/sanitizer.js';
+import { exec } from "node:child_process";
+import { constants as fsConstants } from "node:fs";
+import fs from "node:fs/promises";
+import path from "node:path";
+import { promisify } from "node:util";
+import { getAdapter } from "../cli-adapters/index.js";
+import type {
+	LoadedConfig,
+	ReviewGateConfig,
+	ReviewPromptFrontmatter,
+} from "../config/types.js";
+import { CheckGateExecutor } from "../gates/check.js";
+import type { GateResult } from "../gates/result.js";
+import { ReviewGateExecutor } from "../gates/review.js";
+import type { ConsoleReporter } from "../output/console.js";
+import type { Logger } from "../output/logger.js";
+import type { PreviousViolation } from "../utils/log-parser.js";
+import { sanitizeJobId } from "../utils/sanitizer.js";
+import type { Job } from "./job.js";
 
 const execAsync = promisify(exec);
 
 export class Runner {
-  private checkExecutor = new CheckGateExecutor();
-  private reviewExecutor = new ReviewGateExecutor();
-  private results: GateResult[] = [];
-  private shouldStop = false;
+	private checkExecutor = new CheckGateExecutor();
+	private reviewExecutor = new ReviewGateExecutor();
+	private results: GateResult[] = [];
+	private shouldStop = false;
 
-  constructor(
-    private config: LoadedConfig,
-    private logger: Logger,
-    private reporter: ConsoleReporter,
-    private previousFailuresMap?: Map<string, Map<string, PreviousViolation[]>>,
-    private changeOptions?: { commit?: string; uncommitted?: boolean }
-  ) {}
+	constructor(
+		private config: LoadedConfig,
+		private logger: Logger,
+		private reporter: ConsoleReporter,
+		private previousFailuresMap?: Map<string, Map<string, PreviousViolation[]>>,
+		private changeOptions?: { commit?: string; uncommitted?: boolean },
+	) {}
 
-  async run(jobs: Job[]): Promise<boolean> {
-    await this.logger.init();
+	async run(jobs: Job[]): Promise<boolean> {
+		await this.logger.init();
 
-    const { runnableJobs, preflightResults } = await this.preflight(jobs);
-    this.results.push(...preflightResults);
+		const { runnableJobs, preflightResults } = await this.preflight(jobs);
+		this.results.push(...preflightResults);
 
-    const parallelEnabled = this.config.project.allow_parallel;
-    const parallelJobs = parallelEnabled ? runnableJobs.filter(j => j.gateConfig.parallel) : [];
-    const sequentialJobs = parallelEnabled ? runnableJobs.filter(j => !j.gateConfig.parallel) : runnableJobs;
+		const parallelEnabled = this.config.project.allow_parallel;
+		const parallelJobs = parallelEnabled
+			? runnableJobs.filter((j) => j.gateConfig.parallel)
+			: [];
+		const sequentialJobs = parallelEnabled
+			? runnableJobs.filter((j) => !j.gateConfig.parallel)
+			: runnableJobs;
 
-    // Start parallel jobs
-    const parallelPromises = parallelJobs.map(job => this.executeJob(job));
+		// Start parallel jobs
+		const parallelPromises = parallelJobs.map((job) => this.executeJob(job));
 
-    // Start sequential jobs
-    // We run them one by one, but concurrently with the parallel batch
-    const sequentialPromise = (async () => {
-      for (const job of sequentialJobs) {
-        if (this.shouldStop) break;
-        await this.executeJob(job);
-      }
-    })();
+		// Start sequential jobs
+		// We run them one by one, but concurrently with the parallel batch
+		const sequentialPromise = (async () => {
+			for (const job of sequentialJobs) {
+				if (this.shouldStop) break;
+				await this.executeJob(job);
+			}
+		})();
 
-    await Promise.all([
-      ...parallelPromises,
-      sequentialPromise
-    ]);
+		await Promise.all([...parallelPromises, sequentialPromise]);
 
-    await this.reporter.printSummary(this.results);
+		await this.reporter.printSummary(this.results);
 
-    return this.results.every(r => r.status === 'pass');
-  }
+		return this.results.every((r) => r.status === "pass");
+	}
 
-  private async executeJob(job: Job): Promise<void> {
-    if (this.shouldStop) return;
+	private async executeJob(job: Job): Promise<void> {
+		if (this.shouldStop) return;
 
-    this.reporter.onJobStart(job);
-    
-    let result: GateResult;
+		this.reporter.onJobStart(job);
 
-    if (job.type === 'check') {
-      const logPath = this.logger.getLogPath(job.id);
-      const jobLogger = await this.logger.createJobLogger(job.id);
-      result = await this.checkExecutor.execute(
-        job.id,
-        job.gateConfig as any,
-        job.workingDirectory,
-        jobLogger
-      );
-      result.logPath = logPath;
-    } else {
-      // Use sanitized Job ID for lookup because that's what log-parser uses (based on filenames)
-      const safeJobId = sanitizeJobId(job.id);
-      const previousFailures = this.previousFailuresMap?.get(safeJobId);
-      const loggerFactory = this.logger.createLoggerFactory(job.id);
-      result = await this.reviewExecutor.execute(
-        job.id,
-        job.gateConfig as any,
-        job.entryPoint,
-        loggerFactory,
-        this.config.project.base_branch,
-        previousFailures,
-        this.changeOptions,
-        this.config.project.cli.check_usage_limit
-      );
-    }
+		let result: GateResult;
 
-    this.results.push(result);
-    this.reporter.onJobComplete(job, result);
+		if (job.type === "check") {
+			const logPath = this.logger.getLogPath(job.id);
+			const jobLogger = await this.logger.createJobLogger(job.id);
+			result = await this.checkExecutor.execute(
+				job.id,
+				job.gateConfig as CheckGateConfig,
+				job.workingDirectory,
+				jobLogger,
+			);
+			result.logPath = logPath;
+		} else {
+			// Use sanitized Job ID for lookup because that's what log-parser uses (based on filenames)
+			const safeJobId = sanitizeJobId(job.id);
+			const previousFailures = this.previousFailuresMap?.get(safeJobId);
+			const loggerFactory = this.logger.createLoggerFactory(job.id);
+			result = await this.reviewExecutor.execute(
+				job.id,
+				job.gateConfig as ReviewGateConfig & ReviewPromptFrontmatter,
+				job.entryPoint,
+				loggerFactory,
+				this.config.project.base_branch,
+				previousFailures,
+				this.changeOptions,
+				this.config.project.cli.check_usage_limit,
+			);
+		}
 
-    // Handle Fail Fast (only for checks, and only when parallel is false)
-    // fail_fast can only be set on checks when parallel is false (enforced by schema)
-    if (result.status !== 'pass' && job.type === 'check' && job.gateConfig.fail_fast) {
-      this.shouldStop = true;
-    }
-  }
+		this.results.push(result);
+		this.reporter.onJobComplete(job, result);
 
-  private async preflight(jobs: Job[]): Promise<{ runnableJobs: Job[]; preflightResults: GateResult[] }> {
-    const runnableJobs: Job[] = [];
-    const preflightResults: GateResult[] = [];
-    const cliCache = new Map<string, boolean>();
+		// Handle Fail Fast (only for checks, and only when parallel is false)
+		// fail_fast can only be set on checks when parallel is false (enforced by schema)
+		if (
+			result.status !== "pass" &&
+			job.type === "check" &&
+			job.gateConfig.fail_fast
+		) {
+			this.shouldStop = true;
+		}
+	}
 
-    for (const job of jobs) {
-      if (this.shouldStop) break;
-      if (job.type === 'check') {
-        const commandName = this.getCommandName((job.gateConfig as any).command);
-        if (!commandName) {
-          preflightResults.push(await this.recordPreflightFailure(job, 'Unable to parse command'));
-          if (this.shouldFailFast(job)) this.shouldStop = true;
-          continue;
-        }
+	private async preflight(
+		jobs: Job[],
+	): Promise<{ runnableJobs: Job[]; preflightResults: GateResult[] }> {
+		const runnableJobs: Job[] = [];
+		const preflightResults: GateResult[] = [];
+		const cliCache = new Map<string, boolean>();
 
-        const available = await this.commandExists(commandName, job.workingDirectory);
-        if (!available) {
-          preflightResults.push(await this.recordPreflightFailure(job, `Missing command: ${commandName}`));
-          if (this.shouldFailFast(job)) this.shouldStop = true;
-          continue;
-        }
-      } else {
-        const reviewConfig = job.gateConfig as ReviewGateConfig & ReviewPromptFrontmatter;
-        const required = reviewConfig.num_reviews ?? 1;
-        const availableTools: string[] = [];
+		for (const job of jobs) {
+			if (this.shouldStop) break;
+			if (job.type === "check") {
+				const commandName = this.getCommandName(
+					(job.gateConfig as CheckGateConfig).command,
+				);
+				if (!commandName) {
+					preflightResults.push(
+						await this.recordPreflightFailure(job, "Unable to parse command"),
+					);
+					if (this.shouldFailFast(job)) this.shouldStop = true;
+					continue;
+				}
 
-        for (const toolName of reviewConfig.cli_preference || []) {
-          if (availableTools.length >= required) break;
-          const cached = cliCache.get(toolName);
-          const isAvailable = cached ?? await this.checkAdapter(toolName);
-          cliCache.set(toolName, isAvailable);
-          if (isAvailable) availableTools.push(toolName);
-        }
+				const available = await this.commandExists(
+					commandName,
+					job.workingDirectory,
+				);
+				if (!available) {
+					preflightResults.push(
+						await this.recordPreflightFailure(
+							job,
+							`Missing command: ${commandName}`,
+						),
+					);
+					if (this.shouldFailFast(job)) this.shouldStop = true;
+					continue;
+				}
+			} else {
+				const reviewConfig = job.gateConfig as ReviewGateConfig &
+					ReviewPromptFrontmatter;
+				const required = reviewConfig.num_reviews ?? 1;
+				const availableTools: string[] = [];
 
-        if (availableTools.length < required) {
-          preflightResults.push(
-            await this.recordPreflightFailure(
-              job,
-              `Missing CLI tools: need ${required}, found ${availableTools.length}`
-            )
-          );
-          if (this.shouldFailFast(job)) this.shouldStop = true;
-          continue;
-        }
-      }
+				for (const toolName of reviewConfig.cli_preference || []) {
+					if (availableTools.length >= required) break;
+					const cached = cliCache.get(toolName);
+					const isAvailable = cached ?? (await this.checkAdapter(toolName));
+					cliCache.set(toolName, isAvailable);
+					if (isAvailable) availableTools.push(toolName);
+				}
 
-      runnableJobs.push(job);
-    }
+				if (availableTools.length < required) {
+					preflightResults.push(
+						await this.recordPreflightFailure(
+							job,
+							`Missing CLI tools: need ${required}, found ${availableTools.length}`,
+						),
+					);
+					if (this.shouldFailFast(job)) this.shouldStop = true;
+					continue;
+				}
+			}
 
-    return { runnableJobs, preflightResults };
-  }
+			runnableJobs.push(job);
+		}
 
-  private async recordPreflightFailure(job: Job, message: string): Promise<GateResult> {
-    if (job.type === 'check') {
-      const logPath = this.logger.getLogPath(job.id);
-      const jobLogger = await this.logger.createJobLogger(job.id);
-      await jobLogger(`[${new Date().toISOString()}] Health check failed\n${message}\n`);
-      return {
-        jobId: job.id,
-        status: 'error',
-        duration: 0,
-        message,
-        logPath
-      };
-    }
+		return { runnableJobs, preflightResults };
+	}
 
-    return {
-      jobId: job.id,
-      status: 'error',
-      duration: 0,
-      message
-    };
-  }
+	private async recordPreflightFailure(
+		job: Job,
+		message: string,
+	): Promise<GateResult> {
+		if (job.type === "check") {
+			const logPath = this.logger.getLogPath(job.id);
+			const jobLogger = await this.logger.createJobLogger(job.id);
+			await jobLogger(
+				`[${new Date().toISOString()}] Health check failed\n${message}\n`,
+			);
+			return {
+				jobId: job.id,
+				status: "error",
+				duration: 0,
+				message,
+				logPath,
+			};
+		}
 
-  private async checkAdapter(name: string): Promise<boolean> {
-    const adapter = getAdapter(name);
-    if (!adapter) return false;
-    const health = await adapter.checkHealth({ 
-      checkUsageLimit: this.config.project.cli.check_usage_limit 
-    });
-    return health.status === 'healthy';
-  }
+		return {
+			jobId: job.id,
+			status: "error",
+			duration: 0,
+			message,
+		};
+	}
 
-  private getCommandName(command: string): string | null {
-    const tokens = this.tokenize(command);
-    for (const token of tokens) {
-      if (token === 'env') continue;
-      if (this.isEnvAssignment(token)) continue;
-      return token;
-    }
-    return null;
-  }
+	private async checkAdapter(name: string): Promise<boolean> {
+		const adapter = getAdapter(name);
+		if (!adapter) return false;
+		const health = await adapter.checkHealth({
+			checkUsageLimit: this.config.project.cli.check_usage_limit,
+		});
+		return health.status === "healthy";
+	}
 
-  private tokenize(command: string): string[] {
-    const matches = command.match(/(?:[^\s"']+|"[^"]*"|'[^']*')+/g);
-    if (!matches) return [];
-    return matches.map(token => token.replace(/^['"]|['"]$/g, ''));
-  }
+	private getCommandName(command: string): string | null {
+		const tokens = this.tokenize(command);
+		for (const token of tokens) {
+			if (token === "env") continue;
+			if (this.isEnvAssignment(token)) continue;
+			return token;
+		}
+		return null;
+	}
 
-  private isEnvAssignment(token: string): boolean {
-    return /^[A-Za-z_][A-Za-z0-9_]*=/.test(token);
-  }
+	private tokenize(command: string): string[] {
+		const matches = command.match(/(?:[^\s"']+|"[^"]*"|'[^']*')+/g);
+		if (!matches) return [];
+		return matches.map((token) => token.replace(/^['"]|['"]$/g, ""));
+	}
 
-  private async commandExists(command: string, cwd: string): Promise<boolean> {
-    if (command.includes('/') || command.startsWith('.')) {
-      const resolved = path.isAbsolute(command) ? command : path.join(cwd, command);
-      try {
-        await fs.access(resolved, fsConstants.X_OK);
-        return true;
-      } catch {
-        return false;
-      }
-    }
+	private isEnvAssignment(token: string): boolean {
+		return /^[A-Za-z_][A-Za-z0-9_]*=/.test(token);
+	}
 
-    try {
-      await execAsync(`command -v ${command}`);
-      return true;
-    } catch {
-      return false;
-    }
-  }
+	private async commandExists(command: string, cwd: string): Promise<boolean> {
+		if (command.includes("/") || command.startsWith(".")) {
+			const resolved = path.isAbsolute(command)
+				? command
+				: path.join(cwd, command);
+			try {
+				await fs.access(resolved, fsConstants.X_OK);
+				return true;
+			} catch {
+				return false;
+			}
+		}
 
-  private shouldFailFast(job: Job): boolean {
-    // Only checks can have fail_fast, and only when parallel is false
-    return Boolean(job.type === 'check' && job.gateConfig.fail_fast);
-  }
+		try {
+			await execAsync(`command -v ${command}`);
+			return true;
+		} catch {
+			return false;
+		}
+	}
+
+	private shouldFailFast(job: Job): boolean {
+		// Only checks can have fail_fast, and only when parallel is false
+		return Boolean(job.type === "check" && job.gateConfig.fail_fast);
+	}
 }

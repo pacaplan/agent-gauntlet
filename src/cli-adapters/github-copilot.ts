@@ -8,12 +8,12 @@ import { type CLIAdapter, isUsageLimit } from "./index.js";
 const execAsync = promisify(exec);
 const MAX_BUFFER_BYTES = 10 * 1024 * 1024;
 
-export class ClaudeAdapter implements CLIAdapter {
-	name = "claude";
+export class GitHubCopilotAdapter implements CLIAdapter {
+	name = "github-copilot";
 
 	async isAvailable(): Promise<boolean> {
 		try {
-			await execAsync("which claude");
+			await execAsync("which copilot");
 			return true;
 		} catch {
 			return false;
@@ -37,9 +37,9 @@ export class ClaudeAdapter implements CLIAdapter {
 		if (options?.checkUsageLimit) {
 			try {
 				// Try a lightweight command to check if we're rate limited
-				// We use a simple "hello" prompt to avoid "No messages returned" errors from empty input
+				// Use minimal tool permissions for health check
 				const { stdout, stderr } = await execAsync(
-					'echo "hello" | claude -p --max-turns 1',
+					'echo "hello" | copilot --allow-tool "shell(echo)"',
 					{ timeout: 10000 },
 				);
 
@@ -72,7 +72,6 @@ export class ClaudeAdapter implements CLIAdapter {
 				}
 
 				// Since we sent a valid prompt ("hello"), any other error implies the tool is broken
-				// Extract a brief error message if possible
 				const cleanError =
 					combined.split("\n")[0]?.trim() ||
 					execError.message ||
@@ -89,12 +88,13 @@ export class ClaudeAdapter implements CLIAdapter {
 	}
 
 	getProjectCommandDir(): string | null {
-		return ".claude/commands";
+		// GitHub Copilot CLI does not support custom commands (feature request #618)
+		return null;
 	}
 
 	getUserCommandDir(): string | null {
-		// Claude supports user-level commands at ~/.claude/commands
-		return path.join(os.homedir(), ".claude", "commands");
+		// GitHub Copilot CLI does not support custom commands (feature request #618)
+		return null;
 	}
 
 	getCommandExtension(): string {
@@ -102,12 +102,12 @@ export class ClaudeAdapter implements CLIAdapter {
 	}
 
 	canUseSymlink(): boolean {
-		// Claude uses the same Markdown format as our canonical file
-		return true;
+		// Not applicable - no command directory support
+		return false;
 	}
 
 	transformCommand(markdownContent: string): string {
-		// Claude uses the same Markdown format, no transformation needed
+		// Not applicable - no command directory support
 		return markdownContent;
 	}
 
@@ -123,22 +123,30 @@ export class ClaudeAdapter implements CLIAdapter {
 		// Include process.pid for uniqueness across concurrent processes
 		const tmpFile = path.join(
 			tmpDir,
-			`gauntlet-claude-${process.pid}-${Date.now()}.txt`,
+			`gauntlet-copilot-${process.pid}-${Date.now()}.txt`,
 		);
 		await fs.writeFile(tmpFile, fullContent);
 
 		try {
-			// Recommended invocation per spec:
-			// -p: non-interactive print mode
-			// --allowedTools: explicitly restricts to read-only tools
-			// --max-turns: caps agentic turns
-			const cmd = `cat "${tmpFile}" | claude -p --allowedTools "Read,Glob,Grep" --max-turns 10`;
+			// Copilot reads from stdin when no -p flag is provided
+			// Tool whitelist: cat/grep/ls/find/head/tail are required for the AI to read
+			// and analyze code files during review. While these tools can access files,
+			// they are read-only and necessary for code review functionality.
+			// The copilot CLI is scoped to the repo directory by default.
+			// git is excluded to prevent access to commit history (review should only see diff).
+			//
+			// Shell command construction: We use exec() with shell piping instead of execFile()
+			// because copilot requires stdin input. The tmpFile path is system-controlled
+			// (os.tmpdir() + Date.now() + process.pid), not user-supplied, eliminating injection risk.
+			// Double quotes handle paths with spaces. This pattern matches claude.ts:131.
+			const cmd = `cat "${tmpFile}" | copilot --allow-tool shell(cat) --allow-tool shell(grep) --allow-tool shell(ls) --allow-tool shell(find) --allow-tool shell(head) --allow-tool shell(tail)`;
 			const { stdout } = await execAsync(cmd, {
 				timeout: opts.timeoutMs,
 				maxBuffer: MAX_BUFFER_BYTES,
 			});
 			return stdout;
 		} finally {
+			// Cleanup errors are intentionally ignored - the tmp file will be cleaned up by OS
 			await fs.unlink(tmpFile).catch(() => {});
 		}
 	}

@@ -1,23 +1,24 @@
 #!/usr/bin/env bun
-import { Command } from 'commander';
+import { Command } from "commander";
+import packageJson from "../package.json" with { type: "json" };
 import {
-  registerRunCommand,
-  registerRerunCommand,
-  registerCheckCommand,
-  registerReviewCommand,
-  registerDetectCommand,
-  registerListCommand,
-  registerHealthCommand,
-  registerInitCommand,
-  registerHelpCommand,
-} from './commands/index.js';
+	registerCheckCommand,
+	registerDetectCommand,
+	registerHealthCommand,
+	registerHelpCommand,
+	registerInitCommand,
+	registerListCommand,
+	registerRerunCommand,
+	registerReviewCommand,
+	registerRunCommand,
+} from "./commands/index.js";
 
 const program = new Command();
 
 program
-  .name('agent-gauntlet')
-  .description('AI-assisted quality gates')
-  .version('0.1.0');
+	.name("agent-gauntlet")
+	.description("AI-assisted quality gates")
+	.version(packageJson.version);
 
 // Register all commands
 registerRunCommand(program);
@@ -32,7 +33,7 @@ registerHelpCommand(program);
 
 // Default action: help
 if (process.argv.length < 3) {
-  process.argv.push('help');
+	process.argv.push("help");
 }
 
 program.parse(process.argv);
