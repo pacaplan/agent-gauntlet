@@ -17,3 +17,5 @@ Note: below are instructions to run the local dev version.
    - All gates pass
    - You disagree with remaining failures (ask the human how to proceed)
    - Still failing after 3 rerun attempts
+7. Once all gates pass, do NOT commit or push your changes—await the human's review and explicit instruction to commit.
+

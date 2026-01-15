@@ -43,17 +43,26 @@ export class ConsoleReporter {
     }
   }
 
-  private async extractFailureDetails(result: GateResult): Promise<string[]> {
-    if (!result.logPath) {
+  /** @internal Public for testing */
+  async extractFailureDetails(result: GateResult): Promise<string[]> {
+    const logPaths = result.logPaths || (result.logPath ? [result.logPath] : []);
+    
+    if (logPaths.length === 0) {
       return [result.message ?? 'Unknown error'];
     }
 
-    try {
-      const logContent = await fs.readFile(result.logPath, 'utf-8');
-      return this.parseLogContent(logContent, result.jobId);
-    } catch (error) {
-      return [result.message ?? 'Unknown error', `(Could not read log file: ${result.logPath})`];
+    const allDetails: string[] = [];
+    for (const logPath of logPaths) {
+      try {
+        const logContent = await fs.readFile(logPath, 'utf-8');
+        const details = this.parseLogContent(logContent, result.jobId);
+        allDetails.push(...details);
+      } catch (error: any) {
+        allDetails.push(`(Could not read log file: ${logPath})`);
+      }
     }
+
+    return allDetails.length > 0 ? allDetails : [result.message ?? 'Unknown error'];
   }
 
   private parseLogContent(logContent: string, jobId: string): string[] {
@@ -63,8 +72,13 @@ export class ConsoleReporter {
     // Check if this is a review log
     if (jobId.startsWith('review:')) {
       // Look for parsed violations section (formatted output)
-      const violationsStart = logContent.indexOf('--- Parsed Result ---');
-      if (violationsStart !== -1) {
+      // Use regex to be flexible about adapter name in parentheses
+      // Matches: "--- Parsed Result ---" or "--- Parsed Result (adapter) ---"
+      const parsedResultRegex = /---\s*Parsed Result(?:\s+\(([^)]+)\))?\s*---/;
+      const match = logContent.match(parsedResultRegex);
+      
+      if (match && match.index !== undefined) {
+        const violationsStart = match.index;
         const violationsSection = logContent.substring(violationsStart);
         const sectionLines = violationsSection.split('\n');
         
@@ -192,7 +206,9 @@ export class ConsoleReporter {
       details.forEach(detail => console.log(detail));
     }
     
-    if (result.logPath) {
+    if (result.logPaths && result.logPaths.length > 0) {
+      result.logPaths.forEach(p => console.log(chalk.dim(`  Log: ${p}`)));
+    } else if (result.logPath) {
       console.log(chalk.dim(`  Log: ${result.logPath}`));
     }
     

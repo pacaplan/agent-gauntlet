@@ -71,10 +71,10 @@ export async function parseLogFile(logPath: string): Promise<GateFailures | null
         const violations: PreviousViolation[] = [];
 
         // 1. Look for "--- Parsed Result ---"
-        const parsedResultMatch = sectionContent.match(/--- Parsed Result ---([\s\S]*?)(?:$|---)/);
+        const parsedResultMatch = sectionContent.match(/---\s*Parsed Result(?:\s+\(([^)]+)\))?\s*---([\s\S]*?)(?:$|---)/);
         
         if (parsedResultMatch) {
-            const parsedContent = parsedResultMatch[1];
+            const parsedContent = parsedResultMatch[2];
             
             // Check status
             if (parsedContent.includes('Status: PASS')) {
