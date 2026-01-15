@@ -1,5 +1,6 @@
 #!/usr/bin/env bun
 import { Command } from 'commander';
+import packageJson from '../package.json' with { type: 'json' };
 import {
   registerRunCommand,
   registerRerunCommand,
@@ -17,7 +18,7 @@ const program = new Command();
 program
   .name('agent-gauntlet')
   .description('AI-assisted quality gates')
-  .version('0.1.0');
+  .version(packageJson.version);
 
 // Register all commands
 registerRunCommand(program);
