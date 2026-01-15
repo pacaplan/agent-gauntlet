@@ -74,4 +74,25 @@ cat "<tmpFile>" | claude -p \
   - `Grep`: Search file contents.
 - **`--max-turns 10`**: Limits the number of agentic turns (tool use loops) to prevent infinite loops or excessive costs.
 
+---
+
+## GitHub Copilot CLI
+
+**Adapter**: `src/cli-adapters/github-copilot.ts`
+
+```bash
+cat "<tmpFile>" | copilot \
+  --allow-tool "shell(cat)" "shell(grep)" "shell(ls)" "shell(find)" "shell(head)" "shell(tail)"
+```
+
+### Flags Explanation
+- **No `-p` flag**: When no `-p` flag is provided, `copilot` reads the prompt from stdin.
+- **`--allow-tool "shell(cat)" ...`**: Explicitly whitelists read-only shell tools. Tool names must use the `shell(command)` format. Any attempt to use other tools (like `shell(touch)`, `shell(chmod)`, `shell(node)`, `shell(git)`, `write`) will fail, ensuring read-only safety.
+- **Repo Scoping**: Implicitly scoped to the Current Working Directory (CWD) where the command is executed (repository root).
+- **Model**: Uses the default model configured by the user. Model selection is not supported in this adapter.
+
+### Notes
+- GitHub Copilot CLI does not support custom commands from `.github/prompts/` directory (active feature request [#618](https://github.com/github/copilot-cli/issues/618))
+- Users can configure their preferred model interactively via the `/model` command
+
 ```

@@ -48,6 +48,7 @@ cli:
     - gemini
     - codex
     - claude
+    - github-copilot
   check_usage_limit: false
 
 entry_points:
@@ -110,8 +111,8 @@ Review gates are defined by Markdown files with YAML frontmatter.
 
 ### Frontmatter schema
 
-- **cli_preference**: string[] (optional)  
-  Ordered list of review CLI tools to try (e.g. `gemini`, `codex`, `claude`). If omitted, the project-level `cli.default_preference` is used.
+- **cli_preference**: string[] (optional)
+  Ordered list of review CLI tools to try (e.g. `gemini`, `codex`, `claude`, `github-copilot`). If omitted, the project-level `cli.default_preference` is used.
 - **num_reviews**: number (default: `1`)  
   How many tools to run for this review gate. If greater than 1, multiple CLIs are executed and the gate fails if any of them fail pass/fail evaluation.
 - **parallel**: boolean (default: `true`)  
@@ -137,6 +138,7 @@ cli_preference:
   - gemini
   - codex
   - claude
+  - github-copilot
 num_reviews: 2
 timeout: 120
 ---

@@ -53,7 +53,7 @@ If violations are found:
 If NO violations are found:
 {
   "status": "pass",
-  "message": "No architecture violations found."
+  "message": "No problems found"
 }
 `;
 

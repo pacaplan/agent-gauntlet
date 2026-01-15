@@ -56,13 +56,16 @@ export interface CLIAdapter {
 import { ClaudeAdapter } from "./claude.js";
 import { CodexAdapter } from "./codex.js";
 import { GeminiAdapter } from "./gemini.js";
+import { GitHubCopilotAdapter } from "./github-copilot.js";
 
-export { GeminiAdapter, CodexAdapter, ClaudeAdapter };
+export { GeminiAdapter, CodexAdapter, ClaudeAdapter, GitHubCopilotAdapter };
 
+// Adapter registry: keys must use kebab-case convention
 const adapters: Record<string, CLIAdapter> = {
 	gemini: new GeminiAdapter(),
 	codex: new CodexAdapter(),
 	claude: new ClaudeAdapter(),
+	"github-copilot": new GitHubCopilotAdapter(),
 };
 
 export function getAdapter(name: string): CLIAdapter | undefined {
