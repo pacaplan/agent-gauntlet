@@ -12,10 +12,12 @@ entry_points:
     checks:
       - test
       - lint
-      - security-deps
       - security-code
     reviews:
       - code-quality
+  - path: "package.json"
+    checks:
+      - security-deps
   - path: "docs/plans"
     reviews:
       - plan-review
