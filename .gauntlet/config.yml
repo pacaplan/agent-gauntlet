@@ -12,6 +12,8 @@ entry_points:
     checks:
       - test
       - lint
+      - security-deps
+      - security-code
     reviews:
       - code-quality
   - path: "docs/plans"

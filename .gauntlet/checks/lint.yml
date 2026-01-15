@@ -1,5 +1,5 @@
 name: lint
-command: biome check src
+command: bunx biome check src
 working_directory: .
 parallel: true
 run_in_ci: true
