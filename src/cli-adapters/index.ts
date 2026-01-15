@@ -55,17 +55,25 @@ export interface CLIAdapter {
 
 import { ClaudeAdapter } from "./claude.js";
 import { CodexAdapter } from "./codex.js";
+import { CursorAdapter } from "./cursor.js";
 import { GeminiAdapter } from "./gemini.js";
 import { GitHubCopilotAdapter } from "./github-copilot.js";
 
-export { GeminiAdapter, CodexAdapter, ClaudeAdapter, GitHubCopilotAdapter };
+export {
+	GeminiAdapter,
+	CodexAdapter,
+	ClaudeAdapter,
+	GitHubCopilotAdapter,
+	CursorAdapter,
+};
 
-// Adapter registry: keys must use kebab-case convention
+// Adapter registry: keys should use lowercase with hyphens for multi-word names
 const adapters: Record<string, CLIAdapter> = {
 	gemini: new GeminiAdapter(),
 	codex: new CodexAdapter(),
 	claude: new ClaudeAdapter(),
 	"github-copilot": new GitHubCopilotAdapter(),
+	cursor: new CursorAdapter(),
 };
 
 export function getAdapter(name: string): CLIAdapter | undefined {
@@ -90,4 +98,11 @@ export function getProjectCommandAdapters(): CLIAdapter[] {
  */
 export function getUserCommandAdapters(): CLIAdapter[] {
 	return Object.values(adapters).filter((a) => a.getUserCommandDir() !== null);
+}
+
+/**
+ * Returns all valid CLI tool names (adapter registry keys).
+ */
+export function getValidCLITools(): string[] {
+	return Object.keys(adapters);
 }

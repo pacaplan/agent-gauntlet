@@ -3,6 +3,7 @@ import path from "node:path";
 import matter from "gray-matter";
 import YAML from "yaml";
 import { ZodError } from "zod";
+import { getValidCLITools } from "../cli-adapters/index.js";
 import {
 	checkGateSchema,
 	entryPointSchema,
@@ -14,9 +15,6 @@ import type {
 	GauntletConfig,
 	ReviewPromptFrontmatter,
 } from "./types.js";
-
-// Valid CLI tool names (must match cli-adapters/index.ts)
-const VALID_CLI_TOOLS = ["gemini", "codex", "claude"];
 
 const GAUNTLET_DIR = ".gauntlet";
 const CONFIG_FILE = "config.yml";
@@ -213,12 +211,12 @@ export async function validateConfig(
 								const toolName = frontmatter.cli_preference[i];
 								if (
 									typeof toolName === "string" &&
-									!VALID_CLI_TOOLS.includes(toolName)
+									!getValidCLITools().includes(toolName)
 								) {
 									issues.push({
 										file: filePath,
 										severity: "error",
-										message: `Invalid CLI tool "${toolName}" in cli_preference. Valid options are: ${VALID_CLI_TOOLS.join(", ")}`,
+										message: `Invalid CLI tool "${toolName}" in cli_preference. Valid options are: ${getValidCLITools().join(", ")}`,
 										field: `cli_preference[${i}]`,
 									});
 								}
@@ -251,11 +249,11 @@ export async function validateConfig(
 									i++
 								) {
 									const toolName = parsedFrontmatter.cli_preference[i];
-									if (!VALID_CLI_TOOLS.includes(toolName)) {
+									if (!getValidCLITools().includes(toolName)) {
 										issues.push({
 											file: filePath,
 											severity: "error",
-											message: `Invalid CLI tool "${toolName}" in cli_preference. Valid options are: ${VALID_CLI_TOOLS.join(", ")}`,
+											message: `Invalid CLI tool "${toolName}" in cli_preference. Valid options are: ${getValidCLITools().join(", ")}`,
 											field: `cli_preference[${i}]`,
 										});
 									}
@@ -504,11 +502,11 @@ export async function validateConfig(
 				// Validate defaults are valid tools
 				for (let i = 0; i < defaults.length; i++) {
 					const toolName = defaults[i];
-					if (!VALID_CLI_TOOLS.includes(toolName)) {
+					if (!getValidCLITools().includes(toolName)) {
 						issues.push({
 							file: configPath,
 							severity: "error",
-							message: `Invalid CLI tool "${toolName}" in default_preference. Valid options are: ${VALID_CLI_TOOLS.join(", ")}`,
+							message: `Invalid CLI tool "${toolName}" in default_preference. Valid options are: ${getValidCLITools().join(", ")}`,
 							field: `cli.default_preference[${i}]`,
 						});
 					}

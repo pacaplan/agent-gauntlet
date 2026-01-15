@@ -95,4 +95,23 @@ cat "<tmpFile>" | copilot \
 - GitHub Copilot CLI does not support custom commands from `.github/prompts/` directory (active feature request [#618](https://github.com/github/copilot-cli/issues/618))
 - Users can configure their preferred model interactively via the `/model` command
 
+---
+
+## Cursor
+
+**Adapter**: `src/cli-adapters/cursor.ts`
+
+```bash
+cat "<tmpFile>" | agent
+```
+
+### Flags Explanation
+- **No flags**: The `agent` command reads the prompt from stdin and processes it using Cursor's AI capabilities.
+- **Repo Scoping**: Implicitly scoped to the Current Working Directory (CWD) where the command is executed (repository root).
+- **Model**: Uses the default model configured by the user in Cursor.
+
+### Notes
+- Cursor does not support custom commands
+- The `agent` command is the CLI interface provided by Cursor for AI-assisted development
+
 ```

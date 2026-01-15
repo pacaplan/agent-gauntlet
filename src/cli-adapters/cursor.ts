@@ -8,12 +8,13 @@ import { type CLIAdapter, isUsageLimit } from "./index.js";
 const execAsync = promisify(exec);
 const MAX_BUFFER_BYTES = 10 * 1024 * 1024;
 
-export class ClaudeAdapter implements CLIAdapter {
-	name = "claude";
+export class CursorAdapter implements CLIAdapter {
+	name = "cursor";
 
 	async isAvailable(): Promise<boolean> {
 		try {
-			await execAsync("which claude");
+			// Note: Cursor's CLI binary is named "agent", not "cursor"
+			await execAsync("which agent");
 			return true;
 		} catch {
 			return false;
@@ -37,11 +38,9 @@ export class ClaudeAdapter implements CLIAdapter {
 		if (options?.checkUsageLimit) {
 			try {
 				// Try a lightweight command to check if we're rate limited
-				// We use a simple "hello" prompt to avoid "No messages returned" errors from empty input
-				const { stdout, stderr } = await execAsync(
-					'echo "hello" | claude -p --max-turns 1',
-					{ timeout: 10000 },
-				);
+				const { stdout, stderr } = await execAsync('echo "hello" | agent', {
+					timeout: 10000,
+				});
 
 				const combined = (stdout || "") + (stderr || "");
 				if (isUsageLimit(combined)) {
@@ -72,7 +71,6 @@ export class ClaudeAdapter implements CLIAdapter {
 				}
 
 				// Since we sent a valid prompt ("hello"), any other error implies the tool is broken
-				// Extract a brief error message if possible
 				const cleanError =
 					combined.split("\n")[0]?.trim() ||
 					execError.message ||
@@ -89,12 +87,13 @@ export class ClaudeAdapter implements CLIAdapter {
 	}
 
 	getProjectCommandDir(): string | null {
-		return ".claude/commands";
+		// Cursor does not support custom commands
+		return null;
 	}
 
 	getUserCommandDir(): string | null {
-		// Claude supports user-level commands at ~/.claude/commands
-		return path.join(os.homedir(), ".claude", "commands");
+		// Cursor does not support custom commands
+		return null;
 	}
 
 	getCommandExtension(): string {
@@ -102,12 +101,12 @@ export class ClaudeAdapter implements CLIAdapter {
 	}
 
 	canUseSymlink(): boolean {
-		// Claude uses the same Markdown format as our canonical file
-		return true;
+		// Not applicable - no command directory support
+		return false;
 	}
 
 	transformCommand(markdownContent: string): string {
-		// Claude uses the same Markdown format, no transformation needed
+		// Not applicable - no command directory support
 		return markdownContent;
 	}
 
@@ -123,22 +122,30 @@ export class ClaudeAdapter implements CLIAdapter {
 		// Include process.pid for uniqueness across concurrent processes
 		const tmpFile = path.join(
 			tmpDir,
-			`gauntlet-claude-${process.pid}-${Date.now()}.txt`,
+			`gauntlet-cursor-${process.pid}-${Date.now()}.txt`,
 		);
 		await fs.writeFile(tmpFile, fullContent);
 
 		try {
-			// Recommended invocation per spec:
-			// -p: non-interactive print mode
-			// --allowedTools: explicitly restricts to read-only tools
-			// --max-turns: caps agentic turns
-			const cmd = `cat "${tmpFile}" | claude -p --allowedTools "Read,Glob,Grep" --max-turns 10`;
+			// Cursor agent command reads from stdin
+			// Note: As of the current version, the Cursor 'agent' CLI does not expose
+			// flags for restricting tools or enforcing read-only mode (unlike claude's --allowedTools
+			// or codex's --sandbox read-only). The agent is assumed to be repo-scoped and
+			// safe for code review use. If Cursor adds such flags in the future, they should
+			// be added here for defense-in-depth.
+			//
+			// Shell command construction: We use exec() with shell piping
+			// because the agent requires stdin input. The tmpFile path is system-controlled
+			// (os.tmpdir() + Date.now() + process.pid), not user-supplied, eliminating injection risk.
+			// Double quotes handle paths with spaces.
+			const cmd = `cat "${tmpFile}" | agent`;
 			const { stdout } = await execAsync(cmd, {
 				timeout: opts.timeoutMs,
 				maxBuffer: MAX_BUFFER_BYTES,
 			});
 			return stdout;
 		} finally {
+			// Cleanup errors are intentionally ignored - the tmp file will be cleaned up by OS
 			await fs.unlink(tmpFile).catch(() => {});
 		}
 	}
