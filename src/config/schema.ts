@@ -5,27 +5,29 @@ export const cliConfigSchema = z.object({
   check_usage_limit: z.boolean().default(false),
 });
 
-export const checkGateSchema = z.object({
-  name: z.string().min(1),
-  command: z.string().min(1),
-  working_directory: z.string().optional(),
-  parallel: z.boolean().default(false),
-  run_in_ci: z.boolean().default(true),
-  run_locally: z.boolean().default(true),
-  timeout: z.number().optional(),
-  fail_fast: z.boolean().optional(),
-}).refine(
-  (data) => {
-    // fail_fast can only be used when parallel is false
-    if (data.fail_fast === true && data.parallel === true) {
-      return false;
-    }
-    return true;
-  },
-  {
-    message: "fail_fast can only be used when parallel is false",
-  }
-);
+export const checkGateSchema = z
+  .object({
+    name: z.string().min(1),
+    command: z.string().min(1),
+    working_directory: z.string().optional(),
+    parallel: z.boolean().default(false),
+    run_in_ci: z.boolean().default(true),
+    run_locally: z.boolean().default(true),
+    timeout: z.number().optional(),
+    fail_fast: z.boolean().optional(),
+  })
+  .refine(
+    (data) => {
+      // fail_fast can only be used when parallel is false
+      if (data.fail_fast === true && data.parallel === true) {
+        return false;
+      }
+      return true;
+    },
+    {
+      message: 'fail_fast can only be used when parallel is false',
+    },
+  );
 
 export const reviewGateSchema = z.object({
   name: z.string().min(1),

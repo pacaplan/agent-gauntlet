@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import { Command } from 'commander';
 import { registerHelpCommand } from './help.js';
 
@@ -11,7 +11,7 @@ describe('Help Command', () => {
     program = new Command();
     registerHelpCommand(program);
     logs = [];
-    console.log = (...args: any[]) => {
+    console.log = (...args: unknown[]) => {
       logs.push(args.join(' '));
     };
   });
@@ -21,13 +21,13 @@ describe('Help Command', () => {
   });
 
   it('should register the help command', () => {
-    const helpCmd = program.commands.find(cmd => cmd.name() === 'help');
+    const helpCmd = program.commands.find((cmd) => cmd.name() === 'help');
     expect(helpCmd).toBeDefined();
     expect(helpCmd?.description()).toBe('Show help information');
   });
 
   it('should output help information when executed', async () => {
-    const helpCmd = program.commands.find(cmd => cmd.name() === 'help');
+    const helpCmd = program.commands.find((cmd) => cmd.name() === 'help');
     await helpCmd?.parseAsync(['help']);
 
     const output = logs.join('\n');

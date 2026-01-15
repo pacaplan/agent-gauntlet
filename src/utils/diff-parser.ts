@@ -20,8 +20,10 @@ export function parseDiff(diff: string): Map<string, DiffFileRange> {
         // Extract filename from b/path/to/file (target file)
         const targetPath = parts[3];
         // Remove 'b/' prefix
-        currentFile = targetPath.startsWith('b/') ? targetPath.substring(2) : targetPath;
-        
+        currentFile = targetPath.startsWith('b/')
+          ? targetPath.substring(2)
+          : targetPath;
+
         // Skip .git/ paths
         if (currentFile.startsWith('.git/')) {
           currentFile = null;
@@ -40,8 +42,8 @@ export function parseDiff(diff: string): Map<string, DiffFileRange> {
 
     // Parse hunk header: @@ -old,count +new,count @@
     if (line.startsWith('@@')) {
-      const match = line.match(/@@ \-\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@/);
-      if (match && match[1]) {
+      const match = line.match(/@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@/);
+      if (match?.[1]) {
         currentLineNumber = parseInt(match[1], 10);
       }
       continue;
@@ -51,7 +53,7 @@ export function parseDiff(diff: string): Map<string, DiffFileRange> {
     if (line.startsWith('+') && !line.startsWith('+++')) {
       currentRanges.add(currentLineNumber);
       currentLineNumber++;
-    } 
+    }
     // Track context lines (unchanged) to keep line count correct
     else if (line.startsWith(' ')) {
       currentLineNumber++;
@@ -66,13 +68,13 @@ export function parseDiff(diff: string): Map<string, DiffFileRange> {
  * Checks if a violation is valid based on the parsed diff ranges.
  */
 export function isValidViolationLocation(
-  file: string, 
-  line: number | undefined, 
-  diffRanges: Map<string, DiffFileRange> | undefined
+  file: string,
+  line: number | undefined,
+  diffRanges: Map<string, DiffFileRange> | undefined,
 ): boolean {
   // If no diff ranges provided (e.g. full file review), assume valid
   if (!diffRanges) return true;
-  
+
   // Line is required for diff-scoped reviews
   if (line === undefined) return false;
 

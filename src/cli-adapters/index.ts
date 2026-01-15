@@ -6,19 +6,28 @@ export interface CLIAdapterHealth {
 
 export function isUsageLimit(output: string): boolean {
   const lower = output.toLowerCase();
-  return lower.includes('usage limit') || 
-         lower.includes('quota exceeded') ||
-         lower.includes('quota will reset') ||
-         lower.includes('credit balance is too low') ||
-         lower.includes('out of extra usage') ||
-         lower.includes('out of usage');
+  return (
+    lower.includes('usage limit') ||
+    lower.includes('quota exceeded') ||
+    lower.includes('quota will reset') ||
+    lower.includes('credit balance is too low') ||
+    lower.includes('out of extra usage') ||
+    lower.includes('out of usage')
+  );
 }
 
 export interface CLIAdapter {
   name: string;
   isAvailable(): Promise<boolean>;
-  checkHealth(options?: { checkUsageLimit?: boolean }): Promise<CLIAdapterHealth>;
-  execute(opts: { prompt: string; diff: string; model?: string; timeoutMs?: number }): Promise<string>;
+  checkHealth(options?: {
+    checkUsageLimit?: boolean;
+  }): Promise<CLIAdapterHealth>;
+  execute(opts: {
+    prompt: string;
+    diff: string;
+    model?: string;
+    timeoutMs?: number;
+  }): Promise<string>;
   /**
    * Returns the project-scoped command directory path (relative to project root).
    * Returns null if the CLI only supports user-level commands.
@@ -44,9 +53,9 @@ export interface CLIAdapter {
   transformCommand(markdownContent: string): string;
 }
 
-import { GeminiAdapter } from './gemini.js';
-import { CodexAdapter } from './codex.js';
 import { ClaudeAdapter } from './claude.js';
+import { CodexAdapter } from './codex.js';
+import { GeminiAdapter } from './gemini.js';
 
 export { GeminiAdapter, CodexAdapter, ClaudeAdapter };
 
@@ -68,12 +77,14 @@ export function getAllAdapters(): CLIAdapter[] {
  * Returns all adapters that support project-scoped commands.
  */
 export function getProjectCommandAdapters(): CLIAdapter[] {
-  return Object.values(adapters).filter(a => a.getProjectCommandDir() !== null);
+  return Object.values(adapters).filter(
+    (a) => a.getProjectCommandDir() !== null,
+  );
 }
 
 /**
  * Returns all adapters that support user-level commands.
  */
 export function getUserCommandAdapters(): CLIAdapter[] {
-  return Object.values(adapters).filter(a => a.getUserCommandDir() !== null);
+  return Object.values(adapters).filter((a) => a.getUserCommandDir() !== null);
 }

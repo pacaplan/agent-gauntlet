@@ -1,10 +1,18 @@
-import { describe, it, expect, beforeEach, afterEach, beforeAll, afterAll } from 'bun:test';
-import { Command } from 'commander';
-import { registerListCommand } from './list.js';
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  it,
+} from 'bun:test';
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import { Command } from 'commander';
+import { registerListCommand } from './list.js';
 
-const TEST_DIR = path.join(process.cwd(), 'test-list-' + Date.now());
+const TEST_DIR = path.join(process.cwd(), `test-list-${Date.now()}`);
 const GAUNTLET_DIR = path.join(TEST_DIR, '.gauntlet');
 const CHECKS_DIR = path.join(GAUNTLET_DIR, 'checks');
 const REVIEWS_DIR = path.join(GAUNTLET_DIR, 'reviews');
@@ -25,7 +33,9 @@ describe('List Command', () => {
     await fs.mkdir(REVIEWS_DIR, { recursive: true });
 
     // Write config.yml
-    await fs.writeFile(path.join(GAUNTLET_DIR, 'config.yml'), `
+    await fs.writeFile(
+      path.join(GAUNTLET_DIR, 'config.yml'),
+      `
 base_branch: origin/main
 log_dir: .gauntlet_logs
 cli:
@@ -38,24 +48,31 @@ entry_points:
       - lint
     reviews:
       - security
-`);
+`,
+    );
 
     // Write check definition
-    await fs.writeFile(path.join(CHECKS_DIR, 'lint.yml'), `
+    await fs.writeFile(
+      path.join(CHECKS_DIR, 'lint.yml'),
+      `
 name: lint
 command: npm run lint
 working_directory: .
-`);
+`,
+    );
 
     // Write review definition
-    await fs.writeFile(path.join(REVIEWS_DIR, 'security.md'), `---
+    await fs.writeFile(
+      path.join(REVIEWS_DIR, 'security.md'),
+      `---
 cli_preference:
   - gemini
 ---
 
 # Security Review
 Review for security.
-`);
+`,
+    );
   });
 
   afterAll(async () => {
@@ -67,10 +84,10 @@ Review for security.
     registerListCommand(program);
     logs = [];
     errors = [];
-    console.log = (...args: any[]) => {
+    console.log = (...args: unknown[]) => {
       logs.push(args.join(' '));
     };
-    console.error = (...args: any[]) => {
+    console.error = (...args: unknown[]) => {
       errors.push(args.join(' '));
     };
     process.chdir(TEST_DIR);
@@ -83,13 +100,13 @@ Review for security.
   });
 
   it('should register the list command', () => {
-    const listCmd = program.commands.find(cmd => cmd.name() === 'list');
+    const listCmd = program.commands.find((cmd) => cmd.name() === 'list');
     expect(listCmd).toBeDefined();
     expect(listCmd?.description()).toBe('List configured gates');
   });
 
   it('should list check gates, review gates, and entry points', async () => {
-    const listCmd = program.commands.find(cmd => cmd.name() === 'list');
+    const listCmd = program.commands.find((cmd) => cmd.name() === 'list');
     await listCmd?.parseAsync(['list']);
 
     const output = logs.join('\n');

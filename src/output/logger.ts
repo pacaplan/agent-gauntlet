@@ -34,7 +34,9 @@ export class Logger {
     }
   }
 
-  async createJobLogger(jobId: string): Promise<(text: string) => Promise<void>> {
+  async createJobLogger(
+    jobId: string,
+  ): Promise<(text: string) => Promise<void>> {
     const logPath = this.getLogPath(jobId);
     await this.initFile(logPath);
 
@@ -44,11 +46,18 @@ export class Logger {
       if (lines.length > 0) {
         lines[0] = `[${timestamp}] ${lines[0]}`;
       }
-      await fs.appendFile(logPath, lines.join('\n') + (text.endsWith('\n') ? '' : '\n'));
+      await fs.appendFile(
+        logPath,
+        lines.join('\n') + (text.endsWith('\n') ? '' : '\n'),
+      );
     };
   }
 
-  createLoggerFactory(jobId: string): (adapterName?: string) => Promise<{ logger: (text: string) => Promise<void>; logPath: string }> {
+  createLoggerFactory(
+    jobId: string,
+  ): (
+    adapterName?: string,
+  ) => Promise<{ logger: (text: string) => Promise<void>; logPath: string }> {
     return async (adapterName?: string) => {
       const logPath = this.getLogPath(jobId, adapterName);
       await this.initFile(logPath);
@@ -59,7 +68,10 @@ export class Logger {
         if (lines.length > 0) {
           lines[0] = `[${timestamp}] ${lines[0]}`;
         }
-        await fs.appendFile(logPath, lines.join('\n') + (text.endsWith('\n') ? '' : '\n'));
+        await fs.appendFile(
+          logPath,
+          lines.join('\n') + (text.endsWith('\n') ? '' : '\n'),
+        );
       };
 
       return { logger, logPath };

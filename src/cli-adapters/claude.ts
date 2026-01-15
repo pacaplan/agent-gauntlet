@@ -1,9 +1,9 @@
 import { exec } from 'node:child_process';
+import fs from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
 import { promisify } from 'node:util';
 import { type CLIAdapter, isUsageLimit } from './index.js';
-import fs from 'node:fs/promises';
-import path from 'node:path';
-import os from 'node:os';
 
 const execAsync = promisify(exec);
 const MAX_BUFFER_BYTES = 10 * 1024 * 1024;
@@ -20,48 +20,67 @@ export class ClaudeAdapter implements CLIAdapter {
     }
   }
 
-  async checkHealth(options?: { checkUsageLimit?: boolean }): Promise<{ available: boolean; status: 'healthy' | 'missing' | 'unhealthy'; message?: string }> {
+  async checkHealth(options?: { checkUsageLimit?: boolean }): Promise<{
+    available: boolean;
+    status: 'healthy' | 'missing' | 'unhealthy';
+    message?: string;
+  }> {
     const available = await this.isAvailable();
     if (!available) {
-      return { available: false, status: 'missing', message: 'Command not found' };
+      return {
+        available: false,
+        status: 'missing',
+        message: 'Command not found',
+      };
     }
 
     if (options?.checkUsageLimit) {
       try {
         // Try a lightweight command to check if we're rate limited
         // We use a simple "hello" prompt to avoid "No messages returned" errors from empty input
-        const { stdout, stderr } = await execAsync('echo "hello" | claude -p --max-turns 1', { timeout: 10000 });
-        
+        const { stdout, stderr } = await execAsync(
+          'echo "hello" | claude -p --max-turns 1',
+          { timeout: 10000 },
+        );
+
         const combined = (stdout || '') + (stderr || '');
         if (isUsageLimit(combined)) {
-           return { 
-            available: true, 
-            status: 'unhealthy', 
-            message: 'Usage limit exceeded' 
+          return {
+            available: true,
+            status: 'unhealthy',
+            message: 'Usage limit exceeded',
           };
         }
-  
+
         return { available: true, status: 'healthy', message: 'Ready' };
-      } catch (error: any) {
-        const stderr = error.stderr || '';
-        const stdout = error.stdout || '';
-        const combined = (stderr + stdout);
-        
+      } catch (error: unknown) {
+        const execError = error as {
+          stderr?: string;
+          stdout?: string;
+          message?: string;
+        };
+        const stderr = execError.stderr || '';
+        const stdout = execError.stdout || '';
+        const combined = stderr + stdout;
+
         if (isUsageLimit(combined)) {
-          return { 
-            available: true, 
-            status: 'unhealthy', 
-            message: 'Usage limit exceeded' 
+          return {
+            available: true,
+            status: 'unhealthy',
+            message: 'Usage limit exceeded',
           };
         }
-        
+
         // Since we sent a valid prompt ("hello"), any other error implies the tool is broken
         // Extract a brief error message if possible
-        const cleanError = combined.split('\n')[0]?.trim() || error.message || 'Command failed';
-        return { 
-          available: true, 
-          status: 'unhealthy', 
-          message: `Error: ${cleanError}` 
+        const cleanError =
+          combined.split('\n')[0]?.trim() ||
+          execError.message ||
+          'Command failed';
+        return {
+          available: true,
+          status: 'unhealthy',
+          message: `Error: ${cleanError}`,
         };
       }
     }
@@ -92,8 +111,13 @@ export class ClaudeAdapter implements CLIAdapter {
     return markdownContent;
   }
 
-  async execute(opts: { prompt: string; diff: string; model?: string; timeoutMs?: number }): Promise<string> {
-    const fullContent = opts.prompt + "\n\n--- DIFF ---\n" + opts.diff;
+  async execute(opts: {
+    prompt: string;
+    diff: string;
+    model?: string;
+    timeoutMs?: number;
+  }): Promise<string> {
+    const fullContent = `${opts.prompt}\n\n--- DIFF ---\n${opts.diff}`;
 
     const tmpDir = os.tmpdir();
     const tmpFile = path.join(tmpDir, `gauntlet-claude-${Date.now()}.txt`);
@@ -105,7 +129,10 @@ export class ClaudeAdapter implements CLIAdapter {
       // --allowedTools: explicitly restricts to read-only tools
       // --max-turns: caps agentic turns
       const cmd = `cat "${tmpFile}" | claude -p --allowedTools "Read,Glob,Grep" --max-turns 10`;
-      const { stdout } = await execAsync(cmd, { timeout: opts.timeoutMs, maxBuffer: MAX_BUFFER_BYTES });
+      const { stdout } = await execAsync(cmd, {
+        timeout: opts.timeoutMs,
+        maxBuffer: MAX_BUFFER_BYTES,
+      });
       return stdout;
     } finally {
       await fs.unlink(tmpFile).catch(() => {});

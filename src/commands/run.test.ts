@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from 'bun:test';
+import { beforeEach, describe, expect, it } from 'bun:test';
 import { Command } from 'commander';
 import { registerRunCommand } from './run.js';
 
@@ -11,15 +11,17 @@ describe('Run Command', () => {
   });
 
   it('should register the run command', () => {
-    const runCmd = program.commands.find(cmd => cmd.name() === 'run');
+    const runCmd = program.commands.find((cmd) => cmd.name() === 'run');
     expect(runCmd).toBeDefined();
     expect(runCmd?.description()).toBe('Run gates for detected changes');
   });
 
   it('should have correct options', () => {
-    const runCmd = program.commands.find(cmd => cmd.name() === 'run');
-    expect(runCmd?.options.some(opt => opt.long === '--gate')).toBe(true);
-    expect(runCmd?.options.some(opt => opt.long === '--commit')).toBe(true);
-    expect(runCmd?.options.some(opt => opt.long === '--uncommitted')).toBe(true);
+    const runCmd = program.commands.find((cmd) => cmd.name() === 'run');
+    expect(runCmd?.options.some((opt) => opt.long === '--gate')).toBe(true);
+    expect(runCmd?.options.some((opt) => opt.long === '--commit')).toBe(true);
+    expect(runCmd?.options.some((opt) => opt.long === '--uncommitted')).toBe(
+      true,
+    );
   });
 });

@@ -2,15 +2,15 @@
 import { Command } from 'commander';
 import packageJson from '../package.json' with { type: 'json' };
 import {
-  registerRunCommand,
-  registerRerunCommand,
   registerCheckCommand,
-  registerReviewCommand,
   registerDetectCommand,
-  registerListCommand,
   registerHealthCommand,
-  registerInitCommand,
   registerHelpCommand,
+  registerInitCommand,
+  registerListCommand,
+  registerRerunCommand,
+  registerReviewCommand,
+  registerRunCommand,
 } from './commands/index.js';
 
 const program = new Command();

@@ -1,0 +1,7 @@
+name: lint
+command: biome check src
+working_directory: .
+parallel: true
+run_in_ci: true
+run_locally: true
+timeout: 60

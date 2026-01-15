@@ -11,6 +11,7 @@ entry_points:
   - path: "src"
     checks:
       - test
+      - lint
     reviews:
       - code-quality
   - path: "docs/plans"

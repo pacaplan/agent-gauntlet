@@ -1,10 +1,10 @@
-import type { Command } from 'commander';
-import chalk from 'chalk';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import readline from 'node:readline';
+import chalk from 'chalk';
+import type { Command } from 'commander';
+import { type CLIAdapter, getAllAdapters } from '../cli-adapters/index.js';
 import { exists } from './shared.js';
-import { getAllAdapters, getProjectCommandAdapters, getUserCommandAdapters, type CLIAdapter } from '../cli-adapters/index.js';
 
 const MAX_PROMPT_ATTEMPTS = 10;
 
@@ -45,11 +45,14 @@ export function registerInitCommand(program: Command): void {
   program
     .command('init')
     .description('Initialize .gauntlet configuration')
-    .option('-y, --yes', 'Skip prompts and use defaults (all available CLIs, source: ., no extra checks)')
+    .option(
+      '-y, --yes',
+      'Skip prompts and use defaults (all available CLIs, source: ., no extra checks)',
+    )
     .action(async (options: InitOptions) => {
       const projectRoot = process.cwd();
       const targetDir = path.join(projectRoot, '.gauntlet');
-      
+
       if (await exists(targetDir)) {
         console.log(chalk.yellow('.gauntlet directory already exists.'));
         return;
@@ -61,8 +64,12 @@ export function registerInitCommand(program: Command): void {
 
       if (availableAdapters.length === 0) {
         console.log();
-        console.log(chalk.red('Error: No CLI agents found. Install at least one:'));
-        console.log('  - Claude: https://docs.anthropic.com/en/docs/claude-code');
+        console.log(
+          chalk.red('Error: No CLI agents found. Install at least one:'),
+        );
+        console.log(
+          '  - Claude: https://docs.anthropic.com/en/docs/claude-code',
+        );
         console.log('  - Gemini: https://github.com/google-gemini/gemini-cli');
         console.log('  - Codex: https://github.com/openai/codex');
         console.log();
@@ -86,7 +93,7 @@ export function registerInitCommand(program: Command): void {
       await fs.mkdir(targetDir);
       await fs.mkdir(path.join(targetDir, 'checks'));
       await fs.mkdir(path.join(targetDir, 'reviews'));
-      
+
       // 4. Commented Config Templates
       // Generate config.yml
       const configContent = generateConfigYml(config);
@@ -102,7 +109,10 @@ command: ${config.lintCmd || '# command: TODO - add your lint command (e.g., npm
 # run_locally: true
 # timeout: 300
 `;
-        await fs.writeFile(path.join(targetDir, 'checks', 'lint.yml'), lintContent);
+        await fs.writeFile(
+          path.join(targetDir, 'checks', 'lint.yml'),
+          lintContent,
+        );
         console.log(chalk.green('Created .gauntlet/checks/lint.yml'));
       }
 
@@ -114,7 +124,10 @@ command: ${config.testCmd || '# command: TODO - add your test command (e.g., npm
 # run_locally: true
 # timeout: 300
 `;
-        await fs.writeFile(path.join(targetDir, 'checks', 'unit-tests.yml'), testContent);
+        await fs.writeFile(
+          path.join(targetDir, 'checks', 'unit-tests.yml'),
+          testContent,
+        );
         console.log(chalk.green('Created .gauntlet/checks/unit-tests.yml'));
       }
 
@@ -138,7 +151,10 @@ Review the diff for quality issues:
 
 For each issue: cite file:line, explain the problem, suggest a fix.
 `;
-      await fs.writeFile(path.join(targetDir, 'reviews', 'code-quality.md'), reviewContent);
+      await fs.writeFile(
+        path.join(targetDir, 'reviews', 'code-quality.md'),
+        reviewContent,
+      );
       console.log(chalk.green('Created .gauntlet/reviews/code-quality.md'));
 
       // Write the canonical gauntlet command file
@@ -149,13 +165,24 @@ For each issue: cite file:line, explain the problem, suggest a fix.
       // Handle command installation
       if (options.yes) {
         // Default: install at project level for all selected agents (if they support it)
-        const adaptersToInstall = config.selectedAdapters.filter(a => a.getProjectCommandDir() !== null);
+        const adaptersToInstall = config.selectedAdapters.filter(
+          (a) => a.getProjectCommandDir() !== null,
+        );
         if (adaptersToInstall.length > 0) {
-            await installCommands('project', adaptersToInstall.map(a => a.name), projectRoot, canonicalCommandPath);
+          await installCommands(
+            'project',
+            adaptersToInstall.map((a) => a.name),
+            projectRoot,
+            canonicalCommandPath,
+          );
         }
       } else {
         // Interactive prompts - passing available adapters to avoid re-checking or offering unavailable ones
-        await promptAndInstallCommands(projectRoot, canonicalCommandPath, availableAdapters);
+        await promptAndInstallCommands(
+          projectRoot,
+          canonicalCommandPath,
+          availableAdapters,
+        );
       }
     });
 }
@@ -176,10 +203,12 @@ async function detectAvailableCLIs(): Promise<CLIAdapter[]> {
   return available;
 }
 
-async function promptForConfig(availableAdapters: CLIAdapter[]): Promise<InitConfig> {
+async function promptForConfig(
+  availableAdapters: CLIAdapter[],
+): Promise<InitConfig> {
   const rl = readline.createInterface({
     input: process.stdin,
-    output: process.stdout
+    output: process.stdout,
   });
 
   const question = (prompt: string): Promise<string> => {
@@ -203,12 +232,16 @@ async function promptForConfig(availableAdapters: CLIAdapter[]): Promise<InitCon
     let attempts = 0;
     while (true) {
       attempts++;
-      if (attempts > MAX_PROMPT_ATTEMPTS) throw new Error('Too many invalid attempts');
+      if (attempts > MAX_PROMPT_ATTEMPTS)
+        throw new Error('Too many invalid attempts');
       const answer = await question(`(comma-separated, e.g., 1,2): `);
-      const selections = answer.split(',').map(s => s.trim()).filter(s => s);
-      
+      const selections = answer
+        .split(',')
+        .map((s) => s.trim())
+        .filter((s) => s);
+
       if (selections.length === 0) {
-        // Default to all if empty? Or force selection? Plan says "Which CLIs...". 
+        // Default to all if empty? Or force selection? Plan says "Which CLIs...".
         // Let's assume user must pick or we default to all if they just hit enter?
         // Actually, usually enter means default. Let's make All the default if just Enter.
         selectedAdapters = availableAdapters;
@@ -220,7 +253,11 @@ async function promptForConfig(availableAdapters: CLIAdapter[]): Promise<InitCon
 
       for (const sel of selections) {
         const num = parseInt(sel, 10);
-        if (isNaN(num) || num < 1 || num > availableAdapters.length + 1) {
+        if (
+          Number.isNaN(num) ||
+          num < 1 ||
+          num > availableAdapters.length + 1
+        ) {
           console.log(chalk.yellow(`Invalid selection: ${sel}`));
           valid = false;
           break;
@@ -240,12 +277,16 @@ async function promptForConfig(availableAdapters: CLIAdapter[]): Promise<InitCon
 
     // Source Directory
     console.log();
-    const sourceDirInput = await question('Enter your source directory (e.g., src, lib, .) [default: .]: ');
+    const sourceDirInput = await question(
+      'Enter your source directory (e.g., src, lib, .) [default: .]: ',
+    );
     const sourceDir = sourceDirInput || '.';
 
     // Lint Check
     console.log();
-    const addLint = await question('Would you like to add a linting check? [y/N]: ');
+    const addLint = await question(
+      'Would you like to add a linting check? [y/N]: ',
+    );
     let lintCmd: string | null = null;
     if (addLint.toLowerCase().startsWith('y')) {
       lintCmd = await question('Enter lint command (blank to fill later): ');
@@ -253,7 +294,9 @@ async function promptForConfig(availableAdapters: CLIAdapter[]): Promise<InitCon
 
     // Unit Test Check
     console.log();
-    const addTest = await question('Would you like to add a unit test check? [y/N]: ');
+    const addTest = await question(
+      'Would you like to add a unit test check? [y/N]: ',
+    );
     let testCmd: string | null = null;
     if (addTest.toLowerCase().startsWith('y')) {
       testCmd = await question('Enter test command (blank to fill later): ');
@@ -264,9 +307,8 @@ async function promptForConfig(availableAdapters: CLIAdapter[]): Promise<InitCon
       sourceDir,
       lintCmd,
       testCmd,
-      selectedAdapters
+      selectedAdapters,
     };
-
   } catch (error) {
     rl.close();
     throw error;
@@ -274,10 +316,12 @@ async function promptForConfig(availableAdapters: CLIAdapter[]): Promise<InitCon
 }
 
 function generateConfigYml(config: InitConfig): string {
-  const cliList = config.selectedAdapters.map(a => `    - ${a.name}`).join('\n');
-  
+  const cliList = config.selectedAdapters
+    .map((a) => `    - ${a.name}`)
+    .join('\n');
+
   let entryPoints = '';
-  
+
   // If we have checks, we need a source directory entry point
   if (config.lintCmd !== null || config.testCmd !== null) {
     entryPoints += `  - path: "${config.sourceDir}"
@@ -308,13 +352,17 @@ ${entryPoints}
 `;
 }
 
-async function promptAndInstallCommands(projectRoot: string, canonicalCommandPath: string, availableAdapters: CLIAdapter[]): Promise<void> {
+async function promptAndInstallCommands(
+  projectRoot: string,
+  canonicalCommandPath: string,
+  availableAdapters: CLIAdapter[],
+): Promise<void> {
   // Only proceed if we have available adapters
   if (availableAdapters.length === 0) return;
 
   const rl = readline.createInterface({
     input: process.stdin,
-    output: process.stdout
+    output: process.stdout,
   });
 
   const question = (prompt: string): Promise<string> => {
@@ -328,14 +376,22 @@ async function promptAndInstallCommands(projectRoot: string, canonicalCommandPat
   try {
     console.log();
     console.log(chalk.bold('CLI Agent Command Setup'));
-    console.log(chalk.dim('The gauntlet command can be installed for CLI agents so you can run /gauntlet directly.'));
+    console.log(
+      chalk.dim(
+        'The gauntlet command can be installed for CLI agents so you can run /gauntlet directly.',
+      ),
+    );
     console.log();
 
     // Question 1: Install level
     console.log('Where would you like to install the /gauntlet command?');
-    console.log('  1) Don\'t install commands');
-    console.log('  2) Project level (in this repo\'s .claude/commands, .gemini/commands, etc.)');
-    console.log('  3) User level (in ~/.claude/commands, ~/.gemini/commands, etc.)');
+    console.log("  1) Don't install commands");
+    console.log(
+      "  2) Project level (in this repo's .claude/commands, .gemini/commands, etc.)",
+    );
+    console.log(
+      '  3) User level (in ~/.claude/commands, ~/.gemini/commands, etc.)',
+    );
     console.log();
 
     let installLevel: InstallLevel = 'none';
@@ -344,7 +400,8 @@ async function promptAndInstallCommands(projectRoot: string, canonicalCommandPat
 
     while (true) {
       installLevelAttempts++;
-      if (installLevelAttempts > MAX_PROMPT_ATTEMPTS) throw new Error('Too many invalid attempts');
+      if (installLevelAttempts > MAX_PROMPT_ATTEMPTS)
+        throw new Error('Too many invalid attempts');
 
       if (answer === '1') {
         installLevel = 'none';
@@ -368,12 +425,17 @@ async function promptAndInstallCommands(projectRoot: string, canonicalCommandPat
     }
 
     // Filter available adapters based on install level support
-    const installableAdapters = installLevel === 'project'
-      ? availableAdapters.filter(a => a.getProjectCommandDir() !== null)
-      : availableAdapters.filter(a => a.getUserCommandDir() !== null);
+    const installableAdapters =
+      installLevel === 'project'
+        ? availableAdapters.filter((a) => a.getProjectCommandDir() !== null)
+        : availableAdapters.filter((a) => a.getUserCommandDir() !== null);
 
     if (installableAdapters.length === 0) {
-      console.log(chalk.yellow(`No available agents support ${installLevel}-level commands.`));
+      console.log(
+        chalk.yellow(
+          `No available agents support ${installLevel}-level commands.`,
+        ),
+      );
       rl.close();
       return;
     }
@@ -387,33 +449,45 @@ async function promptAndInstallCommands(projectRoot: string, canonicalCommandPat
     console.log();
 
     let selectedAgents: string[] = [];
-    answer = await question(`Select options (comma-separated, e.g., 1,2 or ${installableAdapters.length + 1} for all): `);
+    answer = await question(
+      `Select options (comma-separated, e.g., 1,2 or ${installableAdapters.length + 1} for all): `,
+    );
     let agentSelectionAttempts = 0;
-    
+
     while (true) {
       agentSelectionAttempts++;
-      if (agentSelectionAttempts > MAX_PROMPT_ATTEMPTS) throw new Error('Too many invalid attempts');
+      if (agentSelectionAttempts > MAX_PROMPT_ATTEMPTS)
+        throw new Error('Too many invalid attempts');
 
-      const selections = answer.split(',').map(s => s.trim()).filter(s => s);
-      
+      const selections = answer
+        .split(',')
+        .map((s) => s.trim())
+        .filter((s) => s);
+
       if (selections.length === 0) {
         console.log(chalk.yellow('Please select at least one option'));
-        answer = await question(`Select options (comma-separated, e.g., 1,2 or ${installableAdapters.length + 1} for all): `);
+        answer = await question(
+          `Select options (comma-separated, e.g., 1,2 or ${installableAdapters.length + 1} for all): `,
+        );
         continue;
       }
 
       let valid = true;
       const agents: string[] = [];
-      
+
       for (const sel of selections) {
         const num = parseInt(sel, 10);
-        if (isNaN(num) || num < 1 || num > installableAdapters.length + 1) {
+        if (
+          Number.isNaN(num) ||
+          num < 1 ||
+          num > installableAdapters.length + 1
+        ) {
           console.log(chalk.yellow(`Invalid selection: ${sel}`));
           valid = false;
           break;
         }
         if (num === installableAdapters.length + 1) {
-          agents.push(...installableAdapters.map(a => a.name));
+          agents.push(...installableAdapters.map((a) => a.name));
         } else {
           agents.push(installableAdapters[num - 1].name);
         }
@@ -423,15 +497,21 @@ async function promptAndInstallCommands(projectRoot: string, canonicalCommandPat
         selectedAgents = [...new Set(agents)]; // Dedupe
         break;
       }
-      answer = await question(`Select options (comma-separated, e.g., 1,2 or ${installableAdapters.length + 1} for all): `);
+      answer = await question(
+        `Select options (comma-separated, e.g., 1,2 or ${installableAdapters.length + 1} for all): `,
+      );
     }
 
     rl.close();
 
     // Install commands
-    await installCommands(installLevel, selectedAgents, projectRoot, canonicalCommandPath);
-
-  } catch (error: any) {
+    await installCommands(
+      installLevel,
+      selectedAgents,
+      projectRoot,
+      canonicalCommandPath,
+    );
+  } catch (error: unknown) {
     rl.close();
     throw error;
   }
@@ -441,7 +521,7 @@ async function installCommands(
   level: InstallLevel,
   agentNames: string[],
   projectRoot: string,
-  canonicalCommandPath: string
+  canonicalCommandPath: string,
 ): Promise<void> {
   if (level === 'none' || agentNames.length === 0) {
     return;
@@ -451,7 +531,7 @@ async function installCommands(
   const allAdapters = getAllAdapters();
 
   for (const agentName of agentNames) {
-    const adapter = allAdapters.find(a => a.name === agentName);
+    const adapter = allAdapters.find((a) => a.name === agentName);
     if (!adapter) continue;
 
     let commandDir: string | null;
@@ -473,7 +553,7 @@ async function installCommands(
       continue;
     }
 
-    const commandFileName = 'gauntlet' + adapter.getCommandExtension();
+    const commandFileName = `gauntlet${adapter.getCommandExtension()}`;
     const commandFilePath = path.join(commandDir, commandFileName);
 
     try {
@@ -482,8 +562,12 @@ async function installCommands(
 
       // Check if file already exists
       if (await exists(commandFilePath)) {
-        const relPath = isUserLevel ? commandFilePath : path.relative(projectRoot, commandFilePath);
-        console.log(chalk.dim(`  ${adapter.name}: ${relPath} already exists, skipping`));
+        const relPath = isUserLevel
+          ? commandFilePath
+          : path.relative(projectRoot, commandFilePath);
+        console.log(
+          chalk.dim(`  ${adapter.name}: ${relPath} already exists, skipping`),
+        );
         continue;
       }
 
@@ -494,16 +578,29 @@ async function installCommands(
         const relativePath = path.relative(commandDir, canonicalCommandPath);
         await fs.symlink(relativePath, commandFilePath);
         const relPath = path.relative(projectRoot, commandFilePath);
-        console.log(chalk.green(`Created ${relPath} (symlink to .gauntlet/run_gauntlet.md)`));
+        console.log(
+          chalk.green(
+            `Created ${relPath} (symlink to .gauntlet/run_gauntlet.md)`,
+          ),
+        );
       } else {
         // Transform and write the command file
-        const transformedContent = adapter.transformCommand(GAUNTLET_COMMAND_CONTENT);
+        const transformedContent = adapter.transformCommand(
+          GAUNTLET_COMMAND_CONTENT,
+        );
         await fs.writeFile(commandFilePath, transformedContent);
-        const relPath = isUserLevel ? commandFilePath : path.relative(projectRoot, commandFilePath);
+        const relPath = isUserLevel
+          ? commandFilePath
+          : path.relative(projectRoot, commandFilePath);
         console.log(chalk.green(`Created ${relPath}`));
       }
-    } catch (error: any) {
-      console.log(chalk.yellow(`  ${adapter.name}: Could not create command - ${error.message}`));
+    } catch (error: unknown) {
+      const err = error as { message?: string };
+      console.log(
+        chalk.yellow(
+          `  ${adapter.name}: Could not create command - ${err.message}`,
+        ),
+      );
     }
   }
 }

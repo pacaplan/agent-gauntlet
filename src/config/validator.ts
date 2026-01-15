@@ -1,14 +1,19 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import YAML from 'yaml';
 import matter from 'gray-matter';
+import YAML from 'yaml';
 import { ZodError } from 'zod';
 import {
-  gauntletConfigSchema,
   checkGateSchema,
-  reviewPromptFrontmatterSchema,
   entryPointSchema,
+  gauntletConfigSchema,
+  reviewPromptFrontmatterSchema,
 } from './schema.js';
+import type {
+  CheckGateConfig,
+  GauntletConfig,
+  ReviewPromptFrontmatter,
+} from './types.js';
 
 // Valid CLI tool names (must match cli-adapters/index.ts)
 const VALID_CLI_TOOLS = ['gemini', 'codex', 'claude'];
@@ -31,7 +36,9 @@ export interface ValidationResult {
   filesChecked: string[];
 }
 
-export async function validateConfig(rootDir: string = process.cwd()): Promise<ValidationResult> {
+export async function validateConfig(
+  rootDir: string = process.cwd(),
+): Promise<ValidationResult> {
   const issues: ValidationIssue[] = [];
   const filesChecked: string[] = [];
   const gauntletPath = path.join(rootDir, GAUNTLET_DIR);
@@ -40,9 +47,9 @@ export async function validateConfig(rootDir: string = process.cwd()): Promise<V
 
   // 1. Validate project config
   const configPath = path.join(gauntletPath, CONFIG_FILE);
-  let projectConfig: any = null;
-  let checks: Record<string, any> = {};
-  let reviews: Record<string, any> = {};
+  let projectConfig: GauntletConfig | null = null;
+  const checks: Record<string, CheckGateConfig> = {};
+  const reviews: Record<string, ReviewPromptFrontmatter> = {};
 
   try {
     if (await fileExists(configPath)) {
@@ -51,9 +58,9 @@ export async function validateConfig(rootDir: string = process.cwd()): Promise<V
       try {
         const raw = YAML.parse(configContent);
         projectConfig = gauntletConfigSchema.parse(raw);
-      } catch (error: any) {
+      } catch (error: unknown) {
         if (error instanceof ZodError) {
-          error.errors.forEach(err => {
+          error.errors.forEach((err) => {
             issues.push({
               file: configPath,
               severity: 'error',
@@ -61,18 +68,21 @@ export async function validateConfig(rootDir: string = process.cwd()): Promise<V
               field: err.path.join('.'),
             });
           });
-        } else if (error.name === 'YAMLSyntaxError' || error.message?.includes('YAML')) {
-          issues.push({
-            file: configPath,
-            severity: 'error',
-            message: `Malformed YAML: ${error.message}`,
-          });
         } else {
-          issues.push({
-            file: configPath,
-            severity: 'error',
-            message: `Parse error: ${error.message}`,
-          });
+          const err = error as { name?: string; message?: string };
+          if (err.name === 'YAMLSyntaxError' || err.message?.includes('YAML')) {
+            issues.push({
+              file: configPath,
+              severity: 'error',
+              message: `Malformed YAML: ${err.message}`,
+            });
+          } else {
+            issues.push({
+              file: configPath,
+              severity: 'error',
+              message: `Parse error: ${err.message}`,
+            });
+          }
         }
       }
     } else {
@@ -82,11 +92,12 @@ export async function validateConfig(rootDir: string = process.cwd()): Promise<V
         message: 'Config file not found',
       });
     }
-  } catch (error: any) {
+  } catch (error: unknown) {
+    const err = error as { message?: string };
     issues.push({
       file: configPath,
       severity: 'error',
-      message: `Error reading file: ${error.message}`,
+      message: `Error reading file: ${err.message}`,
     });
   }
 
@@ -115,7 +126,7 @@ export async function validateConfig(rootDir: string = process.cwd()): Promise<V
                 field: 'command',
               });
             }
-          } catch (error: any) {
+          } catch (error: unknown) {
             // Try to extract check name from raw YAML even if parsing failed
             try {
               const content = await fs.readFile(filePath, 'utf-8');
@@ -126,9 +137,9 @@ export async function validateConfig(rootDir: string = process.cwd()): Promise<V
             } catch {
               // If we can't even parse the name, that's okay - we'll just skip tracking it
             }
-            
+
             if (error instanceof ZodError) {
-              error.errors.forEach(err => {
+              error.errors.forEach((err) => {
                 issues.push({
                   file: filePath,
                   severity: 'error',
@@ -136,27 +147,34 @@ export async function validateConfig(rootDir: string = process.cwd()): Promise<V
                   field: err.path.join('.'),
                 });
               });
-            } else if (error.name === 'YAMLSyntaxError' || error.message?.includes('YAML')) {
-              issues.push({
-                file: filePath,
-                severity: 'error',
-                message: `Malformed YAML: ${error.message}`,
-              });
             } else {
-              issues.push({
-                file: filePath,
-                severity: 'error',
-                message: `Parse error: ${error.message}`,
-              });
+              const err = error as { name?: string; message?: string };
+              if (
+                err.name === 'YAMLSyntaxError' ||
+                err.message?.includes('YAML')
+              ) {
+                issues.push({
+                  file: filePath,
+                  severity: 'error',
+                  message: `Malformed YAML: ${err.message}`,
+                });
+              } else {
+                issues.push({
+                  file: filePath,
+                  severity: 'error',
+                  message: `Parse error: ${err.message}`,
+                });
+              }
             }
           }
         }
       }
-    } catch (error: any) {
+    } catch (error: unknown) {
+      const err = error as { message?: string };
       issues.push({
         file: checksPath,
         severity: 'error',
-        message: `Error reading checks directory: ${error.message}`,
+        message: `Error reading checks directory: ${err.message}`,
       });
     }
   }
@@ -174,7 +192,7 @@ export async function validateConfig(rootDir: string = process.cwd()): Promise<V
           filesChecked.push(filePath);
           try {
             const content = await fs.readFile(filePath, 'utf-8');
-            const { data: frontmatter, content: promptBody } = matter(content);
+            const { data: frontmatter, content: _promptBody } = matter(content);
 
             // Check if frontmatter exists
             if (!frontmatter || Object.keys(frontmatter).length === 0) {
@@ -187,10 +205,16 @@ export async function validateConfig(rootDir: string = process.cwd()): Promise<V
             }
 
             // Validate CLI tools even if schema validation fails
-            if (frontmatter.cli_preference && Array.isArray(frontmatter.cli_preference)) {
+            if (
+              frontmatter.cli_preference &&
+              Array.isArray(frontmatter.cli_preference)
+            ) {
               for (let i = 0; i < frontmatter.cli_preference.length; i++) {
                 const toolName = frontmatter.cli_preference[i];
-                if (typeof toolName === 'string' && !VALID_CLI_TOOLS.includes(toolName)) {
+                if (
+                  typeof toolName === 'string' &&
+                  !VALID_CLI_TOOLS.includes(toolName)
+                ) {
                   issues.push({
                     file: filePath,
                     severity: 'error',
@@ -201,7 +225,8 @@ export async function validateConfig(rootDir: string = process.cwd()): Promise<V
               }
             }
 
-            const parsedFrontmatter = reviewPromptFrontmatterSchema.parse(frontmatter);
+            const parsedFrontmatter =
+              reviewPromptFrontmatterSchema.parse(frontmatter);
             const name = path.basename(file, '.md');
             reviews[name] = parsedFrontmatter;
 
@@ -214,12 +239,17 @@ export async function validateConfig(rootDir: string = process.cwd()): Promise<V
                 issues.push({
                   file: filePath,
                   severity: 'error',
-                  message: 'cli_preference if provided cannot be an empty array. Remove it to use defaults.',
+                  message:
+                    'cli_preference if provided cannot be an empty array. Remove it to use defaults.',
                   field: 'cli_preference',
                 });
               } else {
                 // Validate each CLI tool name (double-check after parsing)
-                for (let i = 0; i < parsedFrontmatter.cli_preference.length; i++) {
+                for (
+                  let i = 0;
+                  i < parsedFrontmatter.cli_preference.length;
+                  i++
+                ) {
                   const toolName = parsedFrontmatter.cli_preference[i];
                   if (!VALID_CLI_TOOLS.includes(toolName)) {
                     issues.push({
@@ -233,7 +263,10 @@ export async function validateConfig(rootDir: string = process.cwd()): Promise<V
               }
             }
 
-            if (parsedFrontmatter.num_reviews !== undefined && parsedFrontmatter.num_reviews < 1) {
+            if (
+              parsedFrontmatter.num_reviews !== undefined &&
+              parsedFrontmatter.num_reviews < 1
+            ) {
               issues.push({
                 file: filePath,
                 severity: 'error',
@@ -242,7 +275,10 @@ export async function validateConfig(rootDir: string = process.cwd()): Promise<V
               });
             }
 
-            if (parsedFrontmatter.timeout !== undefined && parsedFrontmatter.timeout <= 0) {
+            if (
+              parsedFrontmatter.timeout !== undefined &&
+              parsedFrontmatter.timeout <= 0
+            ) {
               issues.push({
                 file: filePath,
                 severity: 'error',
@@ -250,69 +286,91 @@ export async function validateConfig(rootDir: string = process.cwd()): Promise<V
                 field: 'timeout',
               });
             }
-          } catch (error: any) {
-            if (error instanceof ZodError && error.errors && Array.isArray(error.errors)) {
-              error.errors.forEach((err: any) => {
-                const fieldPath = err.path && Array.isArray(err.path) ? err.path.join('.') : undefined;
-                const message = err.message || `Invalid value for ${fieldPath || 'field'}`;
+          } catch (error: unknown) {
+            if (error instanceof ZodError) {
+              error.errors.forEach((err) => {
+                const fieldPath =
+                  err.path && Array.isArray(err.path)
+                    ? err.path.join('.')
+                    : undefined;
+                const message =
+                  err.message || `Invalid value for ${fieldPath || 'field'}`;
                 issues.push({
                   file: filePath,
                   severity: 'error',
-                  message: message,
+                  message,
                   field: fieldPath,
                 });
               });
-            } else if (error.name === 'YAMLSyntaxError' || error.message?.includes('YAML')) {
-              issues.push({
-                file: filePath,
-                severity: 'error',
-                message: `Malformed YAML frontmatter: ${error.message || 'Unknown YAML error'}`,
-              });
             } else {
-              // Try to parse error message from stringified error
-              let errorMessage = error.message || String(error);
-              try {
-                const parsed = JSON.parse(errorMessage);
-                if (Array.isArray(parsed)) {
-                  // Handle array of Zod errors
-                  parsed.forEach((err: any) => {
-                    const fieldPath = err.path && Array.isArray(err.path) ? err.path.join('.') : undefined;
+              const err = error as { name?: string; message?: string };
+              if (
+                err.name === 'YAMLSyntaxError' ||
+                err.message?.includes('YAML')
+              ) {
+                issues.push({
+                  file: filePath,
+                  severity: 'error',
+                  message: `Malformed YAML frontmatter: ${
+                    err.message || 'Unknown YAML error'
+                  }`,
+                });
+              } else {
+                // Try to parse error message from stringified error
+                const errorMessage = err.message || String(error);
+                try {
+                  const parsed = JSON.parse(errorMessage);
+                  if (Array.isArray(parsed)) {
+                    // Handle array of Zod errors
+                    parsed.forEach(
+                      (err: { path: string[]; message: string }) => {
+                        const fieldPath =
+                          err.path && Array.isArray(err.path)
+                            ? err.path.join('.')
+                            : undefined;
+                        issues.push({
+                          file: filePath,
+                          severity: 'error',
+                          message:
+                            err.message ||
+                            `Invalid value for ${fieldPath || 'field'}`,
+                          field: fieldPath,
+                        });
+                      },
+                    );
+                  } else {
                     issues.push({
                       file: filePath,
                       severity: 'error',
-                      message: err.message || `Invalid value for ${fieldPath || 'field'}`,
-                      field: fieldPath,
+                      message: errorMessage,
                     });
-                  });
-                } else {
+                  }
+                } catch {
                   issues.push({
                     file: filePath,
                     severity: 'error',
                     message: errorMessage,
                   });
                 }
-              } catch {
-                issues.push({
-                  file: filePath,
-                  severity: 'error',
-                  message: errorMessage,
-                });
               }
             }
           }
         }
       }
-    } catch (error: any) {
+    } catch (error: unknown) {
+      const err = error as { message?: string };
       issues.push({
         file: reviewsPath,
         severity: 'error',
-        message: `Error reading reviews directory: ${error.message || String(error)}`,
+        message: `Error reading reviews directory: ${
+          err.message || String(error)
+        }`,
       });
     }
   }
 
   // 4. Cross-reference validation (entry points referencing gates)
-  if (projectConfig && projectConfig.entry_points) {
+  if (projectConfig?.entry_points) {
     for (let i = 0; i < projectConfig.entry_points.length; i++) {
       const entryPoint = projectConfig.entry_points[i];
       const entryPointPath = `entry_points[${i}]`;
@@ -320,9 +378,9 @@ export async function validateConfig(rootDir: string = process.cwd()): Promise<V
       // Validate entry point schema
       try {
         entryPointSchema.parse(entryPoint);
-      } catch (error: any) {
+      } catch (error: unknown) {
         if (error instanceof ZodError) {
-          error.errors.forEach(err => {
+          error.errors.forEach((err) => {
             issues.push({
               file: configPath,
               severity: 'error',
@@ -370,8 +428,10 @@ export async function validateConfig(rootDir: string = process.cwd()): Promise<V
       }
 
       // Validate entry point has at least one gate
-      if ((!entryPoint.checks || entryPoint.checks.length === 0) &&
-          (!entryPoint.reviews || entryPoint.reviews.length === 0)) {
+      if (
+        (!entryPoint.checks || entryPoint.checks.length === 0) &&
+        (!entryPoint.reviews || entryPoint.reviews.length === 0)
+      ) {
         issues.push({
           file: configPath,
           severity: 'warning',
@@ -394,7 +454,10 @@ export async function validateConfig(rootDir: string = process.cwd()): Promise<V
 
   // 5. Validate project-level config values
   if (projectConfig) {
-    if (projectConfig.log_dir !== undefined && projectConfig.log_dir.trim() === '') {
+    if (
+      projectConfig.log_dir !== undefined &&
+      projectConfig.log_dir.trim() === ''
+    ) {
       issues.push({
         file: configPath,
         severity: 'error',
@@ -403,7 +466,10 @@ export async function validateConfig(rootDir: string = process.cwd()): Promise<V
       });
     }
 
-    if (projectConfig.base_branch !== undefined && projectConfig.base_branch.trim() === '') {
+    if (
+      projectConfig.base_branch !== undefined &&
+      projectConfig.base_branch.trim() === ''
+    ) {
       issues.push({
         file: configPath,
         severity: 'error',
@@ -412,7 +478,10 @@ export async function validateConfig(rootDir: string = process.cwd()): Promise<V
       });
     }
 
-    if (projectConfig.entry_points === undefined || projectConfig.entry_points.length === 0) {
+    if (
+      projectConfig.entry_points === undefined ||
+      projectConfig.entry_points.length === 0
+    ) {
       issues.push({
         file: configPath,
         severity: 'error',
@@ -451,26 +520,26 @@ export async function validateConfig(rootDir: string = process.cwd()): Promise<V
         // Instead, we'll iterate over the parsed reviews we collected.
         const allowedTools = new Set(defaults);
         for (const [reviewName, reviewConfig] of Object.entries(reviews)) {
-          const pref = (reviewConfig as any).cli_preference;
+          const pref = reviewConfig.cli_preference;
           if (pref && Array.isArray(pref)) {
-             for (let i = 0; i < pref.length; i++) {
-               const tool = pref[i];
-               if (!allowedTools.has(tool)) {
-                 issues.push({
-                   file: path.join(reviewsPath, `${reviewName}.md`),
-                   severity: 'error',
-                   message: `CLI tool "${tool}" is not in project-level default_preference. Review gates can only use tools enabled in config.yml`,
-                   field: `cli_preference[${i}]`,
-                 });
-               }
-             }
+            for (let i = 0; i < pref.length; i++) {
+              const tool = pref[i];
+              if (!allowedTools.has(tool)) {
+                issues.push({
+                  file: path.join(reviewsPath, `${reviewName}.md`),
+                  severity: 'error',
+                  message: `CLI tool "${tool}" is not in project-level default_preference. Review gates can only use tools enabled in config.yml`,
+                  field: `cli_preference[${i}]`,
+                });
+              }
+            }
           }
         }
       }
     }
   }
 
-  const valid = issues.filter(i => i.severity === 'error').length === 0;
+  const valid = issues.filter((i) => i.severity === 'error').length === 0;
   return { valid, issues, filesChecked };
 }
 

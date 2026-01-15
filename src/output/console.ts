@@ -1,7 +1,7 @@
-import chalk from 'chalk';
 import fs from 'node:fs/promises';
-import { GateResult } from '../gates/result.js';
-import { Job } from '../core/job.js';
+import chalk from 'chalk';
+import type { Job } from '../core/job.js';
+import type { GateResult } from '../gates/result.js';
 
 export class ConsoleReporter {
   onJobStart(job: Job) {
@@ -9,33 +9,36 @@ export class ConsoleReporter {
   }
 
   onJobComplete(job: Job, result: GateResult) {
-    const duration = (result.duration / 1000).toFixed(2) + 's';
+    const duration = `${(result.duration / 1000).toFixed(2)}s`;
     const message = result.message ?? '';
-    
+
     if (result.status === 'pass') {
       console.log(chalk.green(`[PASS]  ${job.id} (${duration})`));
     } else if (result.status === 'fail') {
       console.log(chalk.red(`[FAIL]  ${job.id} (${duration}) - ${message}`));
     } else {
-      console.log(chalk.magenta(`[ERROR] ${job.id} (${duration}) - ${message}`));
+      console.log(
+        chalk.magenta(`[ERROR] ${job.id} (${duration}) - ${message}`),
+      );
     }
   }
 
   async printSummary(results: GateResult[]) {
-    console.log('\n' + chalk.bold('--- Gauntlet Summary ---'));
-    
-    const passed = results.filter(r => r.status === 'pass');
-    const failed = results.filter(r => r.status === 'fail');
-    const errored = results.filter(r => r.status === 'error');
+    console.log(`\n${chalk.bold('--- Gauntlet Summary ---')}`);
+
+    const passed = results.filter((r) => r.status === 'pass');
+    const failed = results.filter((r) => r.status === 'fail');
+    const errored = results.filter((r) => r.status === 'error');
 
     console.log(`Total: ${results.length}`);
     console.log(chalk.green(`Passed: ${passed.length}`));
     if (failed.length > 0) console.log(chalk.red(`Failed: ${failed.length}`));
-    if (errored.length > 0) console.log(chalk.magenta(`Errored: ${errored.length}`));
+    if (errored.length > 0)
+      console.log(chalk.magenta(`Errored: ${errored.length}`));
 
     if (failed.length > 0 || errored.length > 0) {
-      console.log('\n' + chalk.bold('=== Failure Details ===\n'));
-      
+      console.log(`\n${chalk.bold('=== Failure Details ===\n')}`);
+
       for (const result of [...failed, ...errored]) {
         const details = await this.extractFailureDetails(result);
         this.printFailureDetails(result, details);
@@ -45,8 +48,9 @@ export class ConsoleReporter {
 
   /** @internal Public for testing */
   async extractFailureDetails(result: GateResult): Promise<string[]> {
-    const logPaths = result.logPaths || (result.logPath ? [result.logPath] : []);
-    
+    const logPaths =
+      result.logPaths || (result.logPath ? [result.logPath] : []);
+
     if (logPaths.length === 0) {
       return [result.message ?? 'Unknown error'];
     }
@@ -57,16 +61,18 @@ export class ConsoleReporter {
         const logContent = await fs.readFile(logPath, 'utf-8');
         const details = this.parseLogContent(logContent, result.jobId);
         allDetails.push(...details);
-      } catch (error: any) {
+      } catch (_error: unknown) {
         allDetails.push(`(Could not read log file: ${logPath})`);
       }
     }
 
-    return allDetails.length > 0 ? allDetails : [result.message ?? 'Unknown error'];
+    return allDetails.length > 0
+      ? allDetails
+      : [result.message ?? 'Unknown error'];
   }
 
   private parseLogContent(logContent: string, jobId: string): string[] {
-    const lines = logContent.split('\n');
+    const _lines = logContent.split('\n');
     const details: string[] = [];
 
     // Check if this is a review log
@@ -76,22 +82,26 @@ export class ConsoleReporter {
       // Matches: "--- Parsed Result ---" or "--- Parsed Result (adapter) ---"
       const parsedResultRegex = /---\s*Parsed Result(?:\s+\(([^)]+)\))?\s*---/;
       const match = logContent.match(parsedResultRegex);
-      
+
       if (match && match.index !== undefined) {
         const violationsStart = match.index;
         const violationsSection = logContent.substring(violationsStart);
         const sectionLines = violationsSection.split('\n');
-        
+
         for (let i = 0; i < sectionLines.length; i++) {
           const line = sectionLines[i];
           // Match numbered violation lines: "1. file:line - issue" (line can be a number or '?')
-          const violationMatch = line.match(/^\d+\.\s+(.+?):(\d+|\?)\s+-\s+(.+)$/);
+          const violationMatch = line.match(
+            /^\d+\.\s+(.+?):(\d+|\?)\s+-\s+(.+)$/,
+          );
           if (violationMatch) {
             const file = violationMatch[1];
             const lineNum = violationMatch[2];
             const issue = violationMatch[3];
-            details.push(`  ${chalk.cyan(file)}:${chalk.yellow(lineNum)} - ${issue}`);
-            
+            details.push(
+              `  ${chalk.cyan(file)}:${chalk.yellow(lineNum)} - ${issue}`,
+            );
+
             // Check next line for "Fix:" suggestion
             if (i + 1 < sectionLines.length) {
               const nextLine = sectionLines[i + 1].trim();
@@ -114,16 +124,29 @@ export class ConsoleReporter {
           try {
             const jsonStr = logContent.substring(jsonStart, jsonEnd + 1);
             const json = JSON.parse(jsonStr);
-            if (json.status === 'fail' && json.violations && Array.isArray(json.violations)) {
-              json.violations.forEach((v: any) => {
-                const file = v.file || 'unknown';
-                const line = v.line || '?';
-                const issue = v.issue || 'Unknown issue';
-                details.push(`  ${chalk.cyan(file)}:${chalk.yellow(line)} - ${issue}`);
-                if (v.fix) {
-                  details.push(`    ${chalk.dim('Fix:')} ${v.fix}`);
-                }
-              });
+            if (
+              json.status === 'fail' &&
+              json.violations &&
+              Array.isArray(json.violations)
+            ) {
+              json.violations.forEach(
+                (v: {
+                  file?: string;
+                  line?: number | string;
+                  issue?: string;
+                  fix?: string;
+                }) => {
+                  const file = v.file || 'unknown';
+                  const line = v.line || '?';
+                  const issue = v.issue || 'Unknown issue';
+                  details.push(
+                    `  ${chalk.cyan(file)}:${chalk.yellow(line)} - ${issue}`,
+                  );
+                  if (v.fix) {
+                    details.push(`    ${chalk.dim('Fix:')} ${v.fix}`);
+                  }
+                },
+              );
             }
           } catch {
             // JSON parse failed, fall through to other parsing
@@ -138,15 +161,21 @@ export class ConsoleReporter {
         if (errorIndex !== -1) {
           const afterError = logContent.substring(errorIndex + 6).trim();
           const firstErrorLine = afterError.split('\n')[0].trim();
-          if (firstErrorLine && !firstErrorLine.startsWith('Usage:') && !firstErrorLine.startsWith('Commands:')) {
+          if (
+            firstErrorLine &&
+            !firstErrorLine.startsWith('Usage:') &&
+            !firstErrorLine.startsWith('Commands:')
+          ) {
             details.push(`  ${firstErrorLine}`);
           }
         }
-        
+
         // Also check for "Result: error" lines
         if (details.length === 0) {
-          const resultMatch = logContent.match(/Result:\s*error(?:\s*-\s*(.+?))?(?:\n|$)/);
-          if (resultMatch && resultMatch[1]) {
+          const resultMatch = logContent.match(
+            /Result:\s*error(?:\s*-\s*(.+?))?(?:\n|$)/,
+          );
+          if (resultMatch?.[1]) {
             details.push(`  ${resultMatch[1]}`);
           }
         }
@@ -157,15 +186,19 @@ export class ConsoleReporter {
       const stderrStart = logContent.indexOf('STDERR:');
       if (stderrStart !== -1) {
         const stderrSection = logContent.substring(stderrStart + 7).trim();
-        const stderrLines = stderrSection.split('\n').filter(line => {
+        const stderrLines = stderrSection.split('\n').filter((line) => {
           // Skip empty lines and command output markers
-          return line.trim() && 
-                 !line.includes('STDOUT:') && 
-                 !line.includes('Command failed:') &&
-                 !line.includes('Result:');
+          return (
+            line.trim() &&
+            !line.includes('STDOUT:') &&
+            !line.includes('Command failed:') &&
+            !line.includes('Result:')
+          );
         });
         if (stderrLines.length > 0) {
-          details.push(...stderrLines.slice(0, 10).map(line => `  ${line.trim()}`));
+          details.push(
+            ...stderrLines.slice(0, 10).map((line) => `  ${line.trim()}`),
+          );
         }
       }
 
@@ -176,7 +209,9 @@ export class ConsoleReporter {
           details.push(`  ${errorMatch[1]}`);
         } else {
           // Look for any line with "Result: fail" or "Result: error"
-          const resultMatch = logContent.match(/Result:\s*(fail|error)\s*-\s*(.+?)(?:\n|$)/);
+          const resultMatch = logContent.match(
+            /Result:\s*(fail|error)\s*-\s*(.+?)(?:\n|$)/,
+          );
           if (resultMatch) {
             details.push(`  ${resultMatch[2]}`);
           }
@@ -195,23 +230,27 @@ export class ConsoleReporter {
   private printFailureDetails(result: GateResult, details: string[]) {
     const statusColor = result.status === 'error' ? chalk.magenta : chalk.red;
     const statusLabel = result.status === 'error' ? 'ERROR' : 'FAIL';
-    
+
     console.log(statusColor(`[${statusLabel}] ${result.jobId}`));
     if (result.message) {
       console.log(chalk.dim(`  Summary: ${result.message}`));
     }
-    
+
     if (details.length > 0) {
       console.log(chalk.dim('  Details:'));
-      details.forEach(detail => console.log(detail));
+      details.forEach((detail) => {
+        console.log(detail);
+      });
     }
-    
+
     if (result.logPaths && result.logPaths.length > 0) {
-      result.logPaths.forEach(p => console.log(chalk.dim(`  Log: ${p}`)));
+      result.logPaths.forEach((p) => {
+        console.log(chalk.dim(`  Log: ${p}`));
+      });
     } else if (result.logPath) {
       console.log(chalk.dim(`  Log: ${result.logPath}`));
     }
-    
+
     console.log(''); // Empty line between failures
   }
 }

@@ -1,5 +1,10 @@
-import { ExpandedEntryPoint } from './entry-point.js';
-import { LoadedConfig, CheckGateConfig, ReviewGateConfig, ReviewPromptFrontmatter } from '../config/types.js';
+import type {
+  CheckGateConfig,
+  LoadedConfig,
+  ReviewGateConfig,
+  ReviewPromptFrontmatter,
+} from '../config/types.js';
+import type { ExpandedEntryPoint } from './entry-point.js';
 
 export type JobType = 'check' | 'review';
 
@@ -17,7 +22,8 @@ export class JobGenerator {
 
   generateJobs(expandedEntryPoints: ExpandedEntryPoint[]): Job[] {
     const jobs: Job[] = [];
-    const isCI = process.env.CI === 'true' || process.env.GITHUB_ACTIONS === 'true';
+    const isCI =
+      process.env.CI === 'true' || process.env.GITHUB_ACTIONS === 'true';
 
     for (const ep of expandedEntryPoints) {
       // 1. Process Checks
@@ -25,7 +31,9 @@ export class JobGenerator {
         for (const checkName of ep.config.checks) {
           const checkConfig = this.config.checks[checkName];
           if (!checkConfig) {
-            console.warn(`Warning: Check gate '${checkName}' configured in entry point '${ep.path}' but not found in checks definitions.`);
+            console.warn(
+              `Warning: Check gate '${checkName}' configured in entry point '${ep.path}' but not found in checks definitions.`,
+            );
             continue;
           }
 
@@ -39,7 +47,7 @@ export class JobGenerator {
             name: checkName,
             entryPoint: ep.path,
             gateConfig: checkConfig,
-            workingDirectory: checkConfig.working_directory || ep.path
+            workingDirectory: checkConfig.working_directory || ep.path,
           });
         }
       }
@@ -49,7 +57,9 @@ export class JobGenerator {
         for (const reviewName of ep.config.reviews) {
           const reviewConfig = this.config.reviews[reviewName];
           if (!reviewConfig) {
-            console.warn(`Warning: Review gate '${reviewName}' configured in entry point '${ep.path}' but not found in reviews definitions.`);
+            console.warn(
+              `Warning: Review gate '${reviewName}' configured in entry point '${ep.path}' but not found in reviews definitions.`,
+            );
             continue;
           }
 
@@ -63,7 +73,7 @@ export class JobGenerator {
             name: reviewName,
             entryPoint: ep.path,
             gateConfig: reviewConfig,
-            workingDirectory: ep.path // Reviews always run in context of entry point
+            workingDirectory: ep.path, // Reviews always run in context of entry point
           });
         }
       }

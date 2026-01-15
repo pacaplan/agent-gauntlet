@@ -1,10 +1,18 @@
-import { describe, it, expect, beforeEach, afterEach, beforeAll, afterAll } from 'bun:test';
-import { Command } from 'commander';
-import { registerHealthCommand } from './health.js';
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  it,
+} from 'bun:test';
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import { Command } from 'commander';
+import { registerHealthCommand } from './health.js';
 
-const TEST_DIR = path.join(process.cwd(), 'test-health-' + Date.now());
+const TEST_DIR = path.join(process.cwd(), `test-health-${Date.now()}`);
 const GAUNTLET_DIR = path.join(TEST_DIR, '.gauntlet');
 const REVIEWS_DIR = path.join(GAUNTLET_DIR, 'reviews');
 
@@ -21,7 +29,9 @@ describe('Health Command', () => {
     await fs.mkdir(REVIEWS_DIR, { recursive: true });
 
     // Write config.yml
-    await fs.writeFile(path.join(GAUNTLET_DIR, 'config.yml'), `
+    await fs.writeFile(
+      path.join(GAUNTLET_DIR, 'config.yml'),
+      `
 base_branch: origin/main
 log_dir: .gauntlet_logs
 cli:
@@ -30,17 +40,21 @@ cli:
   check_usage_limit: false
 entry_points:
   - path: .
-`);
+`,
+    );
 
     // Write review definition with CLI preference
-    await fs.writeFile(path.join(REVIEWS_DIR, 'security.md'), `---
+    await fs.writeFile(
+      path.join(REVIEWS_DIR, 'security.md'),
+      `---
 cli_preference:
   - gemini
 ---
 
 # Security Review
 Review for security.
-`);
+`,
+    );
   });
 
   afterAll(async () => {
@@ -51,7 +65,7 @@ Review for security.
     program = new Command();
     registerHealthCommand(program);
     logs = [];
-    console.log = (...args: any[]) => {
+    console.log = (...args: unknown[]) => {
       logs.push(args.join(' '));
     };
     process.chdir(TEST_DIR);
@@ -63,13 +77,13 @@ Review for security.
   });
 
   it('should register the health command', () => {
-    const healthCmd = program.commands.find(cmd => cmd.name() === 'health');
+    const healthCmd = program.commands.find((cmd) => cmd.name() === 'health');
     expect(healthCmd).toBeDefined();
     expect(healthCmd?.description()).toBe('Check CLI tool availability');
   });
 
   it('should run health check', async () => {
-    const healthCmd = program.commands.find(cmd => cmd.name() === 'health');
+    const healthCmd = program.commands.find((cmd) => cmd.name() === 'health');
     await healthCmd?.parseAsync(['health']);
 
     const output = logs.join('\n');
