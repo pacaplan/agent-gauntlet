@@ -1,5 +1,7 @@
 # Agent Gauntlet
 
+> Don't just review the agent's code — put it through the gauntlet.
+
 Agent Gauntlet is a configurable “quality gate” runner for AI-assisted development workflows.
 
 You define:
