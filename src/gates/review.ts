@@ -493,7 +493,8 @@ export class ReviewGateExecutor {
 		entryPointPath: string,
 		baseBranch: string,
 	): Promise<string> {
-		const baseRef = process.env.GITHUB_BASE_REF || baseBranch;
+		// Base branch priority is already resolved by caller
+		const baseRef = baseBranch;
 		const headRef = process.env.GITHUB_SHA || "HEAD";
 		const pathArg = this.pathArg(entryPointPath);
 
