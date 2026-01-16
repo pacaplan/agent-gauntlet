@@ -11,6 +11,10 @@ export function registerDetectCommand(program: Command): void {
 		.description(
 			"Show what gates would run for detected changes (without executing them)",
 		)
+		.option(
+			"-b, --base-branch <branch>",
+			"Override base branch for change detection",
+		)
 		.option("-c, --commit <sha>", "Use diff for a specific commit")
 		.option(
 			"-u, --uncommitted",
@@ -19,7 +23,18 @@ export function registerDetectCommand(program: Command): void {
 		.action(async (options) => {
 			try {
 				const config = await loadConfig();
-				const changeDetector = new ChangeDetector(config.project.base_branch, {
+
+				// Determine effective base branch
+				// Priority: CLI override > CI env var > config
+				const effectiveBaseBranch =
+					options.baseBranch ||
+					(process.env.GITHUB_BASE_REF &&
+					(process.env.CI === "true" || process.env.GITHUB_ACTIONS === "true")
+						? process.env.GITHUB_BASE_REF
+						: null) ||
+					config.project.base_branch;
+
+				const changeDetector = new ChangeDetector(effectiveBaseBranch, {
 					commit: options.commit,
 					uncommitted: options.uncommitted,
 				});

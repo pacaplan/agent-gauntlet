@@ -13,6 +13,10 @@ export function registerReviewCommand(program: Command): void {
 	program
 		.command("review")
 		.description("Run only applicable reviews for detected changes")
+		.option(
+			"-b, --base-branch <branch>",
+			"Override base branch for change detection",
+		)
 		.option("-g, --gate <name>", "Run specific review gate only")
 		.option("-c, --commit <sha>", "Use diff for a specific commit")
 		.option(
@@ -26,7 +30,17 @@ export function registerReviewCommand(program: Command): void {
 				// Rotate logs before starting
 				await rotateLogs(config.project.log_dir);
 
-				const changeDetector = new ChangeDetector(config.project.base_branch, {
+				// Determine effective base branch
+				// Priority: CLI override > CI env var > config
+				const effectiveBaseBranch =
+					options.baseBranch ||
+					(process.env.GITHUB_BASE_REF &&
+					(process.env.CI === "true" || process.env.GITHUB_ACTIONS === "true")
+						? process.env.GITHUB_BASE_REF
+						: null) ||
+					config.project.base_branch;
+
+				const changeDetector = new ChangeDetector(effectiveBaseBranch, {
 					commit: options.commit,
 					uncommitted: options.uncommitted,
 				});
@@ -65,7 +79,14 @@ export function registerReviewCommand(program: Command): void {
 
 				const logger = new Logger(config.project.log_dir);
 				const reporter = new ConsoleReporter();
-				const runner = new Runner(config, logger, reporter);
+				const runner = new Runner(
+					config,
+					logger,
+					reporter,
+					undefined,
+					undefined,
+					effectiveBaseBranch,
+				);
 
 				const success = await runner.run(jobs);
 				process.exit(success ? 0 : 1);

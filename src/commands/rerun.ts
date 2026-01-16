@@ -19,6 +19,10 @@ export function registerRerunCommand(program: Command): void {
 		.description(
 			"Rerun gates (checks & reviews) with previous failures as context (defaults to uncommitted changes)",
 		)
+		.option(
+			"-b, --base-branch <branch>",
+			"Override base branch for change detection",
+		)
 		.option("-g, --gate <name>", "Run specific gate only")
 		.option(
 			"-c, --commit <sha>",
@@ -71,6 +75,16 @@ export function registerRerunCommand(program: Command): void {
 				// Rotate logs before starting the new run
 				await rotateLogs(config.project.log_dir);
 
+				// Determine effective base branch
+				// Priority: CLI override > CI env var > config
+				const effectiveBaseBranch =
+					options.baseBranch ||
+					(process.env.GITHUB_BASE_REF &&
+					(process.env.CI === "true" || process.env.GITHUB_ACTIONS === "true")
+						? process.env.GITHUB_BASE_REF
+						: null) ||
+					config.project.base_branch;
+
 				// Detect changes (default to uncommitted unless --commit is specified)
 				// Note: Rerun defaults to uncommitted changes for faster iteration loops,
 				// unlike 'run' which defaults to base_branch comparison.
@@ -80,7 +94,7 @@ export function registerRerunCommand(program: Command): void {
 				};
 
 				const changeDetector = new ChangeDetector(
-					config.project.base_branch,
+					effectiveBaseBranch,
 					changeOptions,
 				);
 				const expander = new EntryPointExpander();
@@ -132,6 +146,7 @@ export function registerRerunCommand(program: Command): void {
 					reporter,
 					failuresMap, // Pass previous failures map
 					changeOptions, // Pass change detection options
+					effectiveBaseBranch, // Pass effective base branch
 				);
 
 				const success = await runner.run(jobs);

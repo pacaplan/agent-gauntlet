@@ -36,9 +36,9 @@ export class ChangeDetector {
 	}
 
 	private async getCIChangedFiles(): Promise<string[]> {
-		// In GitHub Actions, GITHUB_BASE_REF is the target branch (e.g., main)
-		// GITHUB_SHA is the commit being built
-		const baseRef = process.env.GITHUB_BASE_REF || this.baseBranch;
+		// In GitHub Actions, GITHUB_SHA is the commit being built
+		// Base branch priority is already resolved by caller
+		const baseRef = this.baseBranch;
 		const headRef = process.env.GITHUB_SHA || "HEAD";
 
 		// We might need to fetch first in some shallow clones, but assuming strictly for now
