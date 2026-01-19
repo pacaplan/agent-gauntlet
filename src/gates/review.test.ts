@@ -7,7 +7,7 @@ import type {
 	ReviewPromptFrontmatter,
 } from "../config/types.js";
 import { Logger } from "../output/logger.js";
-import { ReviewGateExecutor } from "./review.js";
+import type { ReviewGateExecutor } from "./review.js";
 
 const TEST_DIR = path.join(process.cwd(), `test-review-logs-${Date.now()}`);
 const LOG_DIR = path.join(TEST_DIR, "logs");
@@ -20,7 +20,6 @@ describe("ReviewGateExecutor Logging", () => {
 		await fs.mkdir(TEST_DIR, { recursive: true });
 		await fs.mkdir(LOG_DIR, { recursive: true });
 		logger = new Logger(LOG_DIR);
-		executor = new ReviewGateExecutor();
 
 		// Mock getAdapter
 		mock.module("../cli-adapters/index.js", () => ({
@@ -51,8 +50,8 @@ describe("ReviewGateExecutor Logging", () => {
 				// Only mock exec, let others pass (though in this test env we likely only use exec)
 				if (fn.name === "exec") {
 					return async (cmd: string) => {
-						if (/^git diff/.test(cmd)) return "diff content";
-						if (/^git ls-files/.test(cmd)) return "file.ts";
+						if (/^git diff/.test(cmd)) return { stdout: "diff content" };
+						if (/^git ls-files/.test(cmd)) return { stdout: "file.ts" };
 						return { stdout: "", stderr: "" };
 					};
 				}
@@ -60,6 +59,9 @@ describe("ReviewGateExecutor Logging", () => {
 				return async () => {};
 			},
 		}));
+
+		const { ReviewGateExecutor } = await import("./review.js");
+		executor = new ReviewGateExecutor();
 	});
 
 	afterEach(async () => {
