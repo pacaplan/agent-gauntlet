@@ -1,5 +1,12 @@
 import type { z } from "zod";
 import type {
+	ciCheckConfigSchema,
+	ciConfigSchema,
+	ciSetupStepSchema,
+	runtimeConfigSchema,
+	serviceConfigSchema,
+} from "./ci-schema.js";
+import type {
 	checkGateSchema,
 	cliConfigSchema,
 	entryPointSchema,
@@ -7,13 +14,6 @@ import type {
 	reviewGateSchema,
 	reviewPromptFrontmatterSchema,
 } from "./schema.js";
-import type {
-	ciCheckConfigSchema,
-	ciConfigSchema,
-	ciSetupStepSchema,
-	runtimeConfigSchema,
-	serviceConfigSchema,
-} from "./ci-schema.js";
 
 export type CheckGateConfig = z.infer<typeof checkGateSchema>;
 export type ReviewGateConfig = z.infer<typeof reviewGateSchema>;

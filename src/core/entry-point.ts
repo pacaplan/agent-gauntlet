@@ -56,7 +56,9 @@ export class EntryPointExpander {
 		return results;
 	}
 
-	async expandAll(entryPoints: EntryPointConfig[]): Promise<ExpandedEntryPoint[]> {
+	async expandAll(
+		entryPoints: EntryPointConfig[],
+	): Promise<ExpandedEntryPoint[]> {
 		const results: ExpandedEntryPoint[] = [];
 
 		for (const ep of entryPoints) {

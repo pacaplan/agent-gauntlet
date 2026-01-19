@@ -4,8 +4,9 @@ import chalk from "chalk";
 import YAML from "yaml";
 import { loadCIConfig } from "../../config/ci-loader.js";
 import type { CIConfig } from "../../config/types.js";
-// @ts-ignore - Bun handles text imports
-import workflowTemplate from "../../templates/workflow.yml" with { type: "text" };
+import workflowTemplate from "../../templates/workflow.yml" with {
+	type: "text",
+};
 
 export async function initCI(): Promise<void> {
 	const workflowDir = path.join(process.cwd(), ".github", "workflows");
@@ -16,6 +17,7 @@ export async function initCI(): Promise<void> {
 	// 1. Ensure .gauntlet/ci.yml exists
 	if (!(await fileExists(ciConfigPath))) {
 		console.log(chalk.yellow("Creating starter .gauntlet/ci.yml..."));
+		await fs.mkdir(gauntletDir, { recursive: true });
 		const starterContent = `# CI Configuration for Agent Gauntlet
 # Define runtimes, services, and which checks to run in CI.
 
@@ -46,7 +48,7 @@ checks:
 	let ciConfig: CIConfig | undefined;
 	try {
 		ciConfig = await loadCIConfig();
-	} catch (e) {
+	} catch (_e) {
 		console.warn(
 			chalk.yellow(
 				"Could not load CI config to inject services. Workflow will have no services defined.",
@@ -66,7 +68,7 @@ checks:
 		// Indent services
 		const indentedServices = servicesYaml
 			.split("\n")
-			.map((line) => (line.trim() ? "    " + line : line))
+			.map((line) => (line.trim() ? `    ${line}` : line))
 			.join("\n");
 
 		templateContent = templateContent.replace(

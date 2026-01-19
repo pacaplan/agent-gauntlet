@@ -63,9 +63,7 @@ export async function listJobs(): Promise<void> {
 	}
 }
 
-const formatSetup = (
-	steps: CISetupStep[] | null | undefined,
-): string => {
+const formatSetup = (steps: CISetupStep[] | null | undefined): string => {
 	if (!steps || steps.length === 0) return "";
 	return steps
 		.map((s) => {

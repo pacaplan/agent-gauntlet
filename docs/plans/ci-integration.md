@@ -135,6 +135,8 @@ run_locally: false  # Set to false for checks that should only run in CI (e.g., 
 
 The `ci init` command reads `ci.yml` and generates a workflow with **static service definitions** (since GitHub Actions evaluates services at parse time, not runtime). The job matrix remains dynamic.
 
+**Note on Installation:** The template below uses `bun add -g agent-gauntlet` for simplicity. Production workflows should ideally check for a local project dependency (e.g., `bun install && bun run agent-gauntlet`) to ensure version consistency, falling back to global installation only if necessary.
+
 ```yaml
 # .github/workflows/gauntlet.yml
 name: Gauntlet CI
@@ -163,7 +165,7 @@ jobs:
       - name: Discover gauntlet jobs
         id: discover
         run: |
-          output=$(agent-gauntlet ci list-jobs)
+          output=$(~/.bun/bin/agent-gauntlet ci list-jobs)
           echo "matrix=$(echo "$output" | jq -c '.matrix')" >> $GITHUB_OUTPUT
           echo "runtimes=$(echo "$output" | jq -c '.runtimes')" >> $GITHUB_OUTPUT
 
@@ -302,11 +304,13 @@ This ensures changes to CI configuration receive the same review scrutiny as wor
 ## Trade-offs & Limitations
 
 ### Static Services
-GitHub Actions evaluates services at workflow parse time, not runtime. The `ci init` command generates the workflow with **all services from ci.yml statically embedded**. All services start for all matrix jobs (unused ones have minimal overhead).
+GitHub Actions evaluates services at workflow parse time, not runtime. The `ci init` command generates the workflow with **all services from ci.yml statically embedded**.
+
+**Impact on Performance:** All services start for *all* matrix jobs. Even simple linter jobs will wait for service health checks (e.g., waiting for Postgres to be ready). This adds startup latency to every job.
 
 **Re-run `ci init` when:**
 - Adding a new service type (e.g., Redis)
-- Changing service configuration (image, env vars, ports)
+- Changing service configuration (image, env, ports)
 
 **NO regeneration needed for:**
 - Adding/removing checks
