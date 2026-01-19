@@ -3,8 +3,8 @@ log_dir: .gauntlet_logs
 allow_parallel: true
 cli:
   default_preference:
-    - claude
     - codex
+    - claude
     - gemini
   check_usage_limit: false
 entry_points:
