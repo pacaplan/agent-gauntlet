@@ -1,3 +1,4 @@
+import fs from "node:fs/promises";
 import path from "node:path";
 import type { EntryPointConfig } from "../config/types.js";
 
@@ -55,6 +56,29 @@ export class EntryPointExpander {
 		return results;
 	}
 
+	async expandAll(entryPoints: EntryPointConfig[]): Promise<ExpandedEntryPoint[]> {
+		const results: ExpandedEntryPoint[] = [];
+
+		for (const ep of entryPoints) {
+			if (ep.path === ".") {
+				results.push({ path: ".", config: ep });
+				continue;
+			}
+
+			if (ep.path.endsWith("*")) {
+				const parentDir = ep.path.slice(0, -2);
+				const subDirs = await this.listSubDirectories(parentDir);
+				for (const subDir of subDirs) {
+					results.push({ path: subDir, config: ep });
+				}
+			} else {
+				results.push({ path: ep.path, config: ep });
+			}
+		}
+
+		return results;
+	}
+
 	private async expandWildcard(
 		parentDir: string,
 		changedFiles: string[],
@@ -78,6 +102,17 @@ export class EntryPointExpander {
 		}
 
 		return Array.from(affectedSubDirs);
+	}
+
+	private async listSubDirectories(parentDir: string): Promise<string[]> {
+		try {
+			const dirents = await fs.readdir(parentDir, { withFileTypes: true });
+			return dirents
+				.filter((d) => d.isDirectory())
+				.map((d) => path.join(parentDir, d.name));
+		} catch {
+			return [];
+		}
 	}
 
 	private hasChangesInDir(dirPath: string, changedFiles: string[]): boolean {

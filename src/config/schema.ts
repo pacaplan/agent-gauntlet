@@ -11,7 +11,6 @@ export const checkGateSchema = z
 		command: z.string().min(1),
 		working_directory: z.string().optional(),
 		parallel: z.boolean().default(false),
-		run_in_ci: z.boolean().default(true),
 		run_locally: z.boolean().default(true),
 		timeout: z.number().optional(),
 		fail_fast: z.boolean().optional(),

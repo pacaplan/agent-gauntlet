@@ -3,6 +3,7 @@ import { Command } from "commander";
 import packageJson from "../package.json" with { type: "json" };
 import {
 	registerCheckCommand,
+	registerCICommand,
 	registerDetectCommand,
 	registerHealthCommand,
 	registerHelpCommand,
@@ -24,6 +25,7 @@ program
 registerRunCommand(program);
 registerRerunCommand(program);
 registerCheckCommand(program);
+registerCICommand(program);
 registerReviewCommand(program);
 registerDetectCommand(program);
 registerListCommand(program);

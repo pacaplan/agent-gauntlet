@@ -7,6 +7,13 @@ import type {
 	reviewGateSchema,
 	reviewPromptFrontmatterSchema,
 } from "./schema.js";
+import type {
+	ciCheckConfigSchema,
+	ciConfigSchema,
+	ciSetupStepSchema,
+	runtimeConfigSchema,
+	serviceConfigSchema,
+} from "./ci-schema.js";
 
 export type CheckGateConfig = z.infer<typeof checkGateSchema>;
 export type ReviewGateConfig = z.infer<typeof reviewGateSchema>;
@@ -16,6 +23,12 @@ export type ReviewPromptFrontmatter = z.infer<
 export type EntryPointConfig = z.infer<typeof entryPointSchema>;
 export type GauntletConfig = z.infer<typeof gauntletConfigSchema>;
 export type CLIConfig = z.infer<typeof cliConfigSchema>;
+
+export type CIConfig = z.infer<typeof ciConfigSchema>;
+export type CICheckConfig = z.infer<typeof ciCheckConfigSchema>;
+export type CISetupStep = z.infer<typeof ciSetupStepSchema>;
+export type RuntimeConfig = z.infer<typeof runtimeConfigSchema>;
+export type ServiceConfig = z.infer<typeof serviceConfigSchema>;
 
 // Combined type for the fully loaded configuration
 export interface LoadedConfig {
