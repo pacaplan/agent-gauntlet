@@ -115,4 +115,21 @@ cat "<tmpFile>" | agent
 - Cursor does not support custom commands
 - The `agent` command is the CLI interface provided by Cursor for AI-assisted development
 
+---
+
+## Agent Gauntlet (CI Integration)
+
+The generated GitHub Actions workflow invokes `agent-gauntlet` to discover the job matrix.
+
+**Command**: `ci list-jobs`
+
+```bash
+agent-gauntlet ci list-jobs
+```
+
+### Behavior
+- **Job Discovery**: Reads `.gauntlet/ci.yml` and `.gauntlet/config.yml` to determine which checks should run in CI based on the current repository structure and entry points.
+- **Output**: Returns a JSON object containing the `matrix` (array of job configurations), `services` (shared service definitions), and `runtimes` (language/runtime requirements).
+- **Automation**: Designed to be piped to `jq` and captured into GitHub Actions outputs for use in `strategy.matrix`.
+
 ```

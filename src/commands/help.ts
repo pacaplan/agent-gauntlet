@@ -24,6 +24,7 @@ export function registerHelpCommand(program: Command): void {
 			console.log("  list     List configured gates");
 			console.log("  health   Check CLI tool availability");
 			console.log("  init     Initialize .gauntlet configuration");
+			console.log("  ci       CI integration commands (init, list-jobs)");
 			console.log("  help     Show this help message\n");
 			console.log(
 				"For more information, see: https://github.com/your-repo/agent-gauntlet",
