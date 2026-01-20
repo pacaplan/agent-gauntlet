@@ -22,6 +22,7 @@ export class JobGenerator {
 
 	generateJobs(expandedEntryPoints: ExpandedEntryPoint[]): Job[] {
 		const jobs: Job[] = [];
+		const seenJobs = new Set<string>();
 		const isCI =
 			process.env.CI === "true" || process.env.GITHUB_ACTIONS === "true";
 
@@ -41,13 +42,22 @@ export class JobGenerator {
 					if (isCI && !checkConfig.run_in_ci) continue;
 					if (!isCI && !checkConfig.run_locally) continue;
 
+					const workingDirectory = checkConfig.working_directory || ep.path;
+					const jobKey = `check:${checkName}:${workingDirectory}`;
+
+					// Skip if we've already created a job for this check in this working directory
+					if (seenJobs.has(jobKey)) {
+						continue;
+					}
+					seenJobs.add(jobKey);
+
 					jobs.push({
 						id: `check:${ep.path}:${checkName}`,
 						type: "check",
 						name: checkName,
 						entryPoint: ep.path,
 						gateConfig: checkConfig,
-						workingDirectory: checkConfig.working_directory || ep.path,
+						workingDirectory: workingDirectory,
 					});
 				}
 			}

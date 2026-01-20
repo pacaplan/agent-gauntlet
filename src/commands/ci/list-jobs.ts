@@ -13,6 +13,7 @@ export async function listJobs(): Promise<void> {
 		);
 
 		const matrixJobs = [];
+		const seenJobs = new Set<string>();
 
 		const globalSetup = formatSetup(ciConfig.setup || undefined);
 
@@ -32,13 +33,22 @@ export async function listJobs(): Promise<void> {
 							continue;
 						}
 
+						const workingDirectory = checkDef.working_directory || ep.path;
+						const jobKey = `${check.name}:${workingDirectory}`;
+
+						// Skip if we've already created a job for this check in this working directory
+						if (seenJobs.has(jobKey)) {
+							continue;
+						}
+						seenJobs.add(jobKey);
+
 						const id = `${check.name}-${ep.path.replace(/\//g, "-")}`;
 
 						matrixJobs.push({
 							id,
 							name: check.name,
 							entry_point: ep.path,
-							working_directory: checkDef.working_directory || ep.path,
+							working_directory: workingDirectory,
 							command: checkDef.command,
 							runtimes: check.requires_runtimes || [],
 							services: check.requires_services || [],
