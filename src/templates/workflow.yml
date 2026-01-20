@@ -19,12 +19,14 @@ jobs:
       - name: Install agent-gauntlet
         run: |
           curl -fsSL https://bun.sh/install | bash
-          ~/.bun/bin/bun add -g agent-gauntlet
+          echo "$HOME/.bun/bin" >> $GITHUB_PATH
+          export PATH="$HOME/.bun/bin:$PATH"
+          bun add -g pacaplan/agent-gauntlet#development
 
       - name: Discover gauntlet jobs
         id: discover
         run: |
-          output=$(~/.bun/bin/agent-gauntlet ci list-jobs)
+          output=$(agent-gauntlet ci list-jobs)
           echo "matrix=$(echo "$output" | jq -c '.matrix')" >> $GITHUB_OUTPUT
           echo "runtimes=$(echo "$output" | jq -c '.runtimes')" >> $GITHUB_OUTPUT
 
