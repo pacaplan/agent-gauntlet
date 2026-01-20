@@ -1,34 +1,8 @@
 import { z } from "zod";
 
-export const runtimeConfigSchema = z.record(
-	z.string(),
-	z
-		.object({
-			version: z.string().min(1),
-			bundler_cache: z.boolean().optional(),
-		})
-		.passthrough(),
-);
+export const runtimeConfigSchema = z.record(z.string(), z.any());
 
-export const serviceConfigSchema = z.record(
-	z.string(),
-	z
-		.object({
-			image: z.string().min(1),
-			env: z.record(z.string()).optional(),
-			ports: z.array(z.string()).optional(),
-			options: z.string().optional(),
-			health_check: z
-				.object({
-					cmd: z.string().optional(),
-					interval: z.string().optional(),
-					timeout: z.string().optional(),
-					retries: z.number().optional(),
-				})
-				.optional(),
-		})
-		.passthrough(),
-);
+export const serviceConfigSchema = z.record(z.string(), z.any());
 
 export const ciSetupStepSchema = z.object({
 	name: z.string().min(1),
