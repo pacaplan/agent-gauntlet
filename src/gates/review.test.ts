@@ -97,33 +97,88 @@ describe("ReviewGateExecutor Logging", () => {
 			"main",
 		);
 
-		expect(result.status).toBe("pass");
-		expect(result.logPaths).toBeDefined();
-		expect(result.logPaths).toHaveLength(2);
-		expect(result.logPaths?.[0]).toContain("review_src_code-quality_codex.log");
-		expect(result.logPaths?.[1]).toContain(
-			"review_src_code-quality_claude.log",
-		);
+		// Enhanced error messages for better debugging
+		if (result.status !== "pass") {
+			throw new Error(
+				`Expected result.status to be "pass" but got "${result.status}". Message: ${result.message || "none"}. Duration: ${result.duration}ms`,
+			);
+		}
+
+		if (!result.logPaths) {
+			throw new Error(
+				`Expected result.logPaths to be defined but got ${JSON.stringify(result.logPaths)}`,
+			);
+		}
+
+		if (result.logPaths.length !== 2) {
+			throw new Error(
+				`Expected result.logPaths to have length 2 but got ${result.logPaths.length}. Paths: ${JSON.stringify(result.logPaths)}`,
+			);
+		}
+
+		if (!result.logPaths[0]?.includes("review_src_code-quality_codex.log")) {
+			throw new Error(
+				`Expected result.logPaths[0] to contain "review_src_code-quality_codex.log" but got "${result.logPaths[0]}"`,
+			);
+		}
+
+		if (!result.logPaths[1]?.includes("review_src_code-quality_claude.log")) {
+			throw new Error(
+				`Expected result.logPaths[1] to contain "review_src_code-quality_claude.log" but got "${result.logPaths[1]}"`,
+			);
+		}
 
 		const files = await fs.readdir(LOG_DIR);
-		expect(files).toContain("review_src_code-quality_codex.log");
-		expect(files).toContain("review_src_code-quality_claude.log");
-		expect(files).not.toContain("review_src_code-quality.log");
+		const filesList = files.join(", ");
+
+		if (!files.includes("review_src_code-quality_codex.log")) {
+			throw new Error(
+				`Expected log directory to contain "review_src_code-quality_codex.log" but only found: [${filesList}]`,
+			);
+		}
+
+		if (!files.includes("review_src_code-quality_claude.log")) {
+			throw new Error(
+				`Expected log directory to contain "review_src_code-quality_claude.log" but only found: [${filesList}]`,
+			);
+		}
+
+		if (files.includes("review_src_code-quality.log")) {
+			throw new Error(
+				`Expected log directory NOT to contain generic log "review_src_code-quality.log" but it was found. All files: [${filesList}]`,
+			);
+		}
 
 		// Verify multiplexed content
 		const codexLog = await fs.readFile(
 			path.join(LOG_DIR, "review_src_code-quality_codex.log"),
 			"utf-8",
 		);
-		expect(codexLog).toContain("Starting review: code-quality");
-		expect(codexLog).toContain("Review result (codex): pass");
+		if (!codexLog.includes("Starting review: code-quality")) {
+			throw new Error(
+				`Expected codex log to contain "Starting review: code-quality" but got: ${codexLog.substring(0, 200)}...`,
+			);
+		}
+		if (!codexLog.includes("Review result (codex): pass")) {
+			throw new Error(
+				`Expected codex log to contain "Review result (codex): pass" but got: ${codexLog.substring(0, 200)}...`,
+			);
+		}
 
 		const claudeLog = await fs.readFile(
 			path.join(LOG_DIR, "review_src_code-quality_claude.log"),
 			"utf-8",
 		);
-		expect(claudeLog).toContain("Starting review: code-quality");
-		expect(claudeLog).toContain("Review result (claude): pass");
+		if (!claudeLog.includes("Starting review: code-quality")) {
+			throw new Error(
+				`Expected claude log to contain "Starting review: code-quality" but got: ${claudeLog.substring(0, 200)}...`,
+			);
+		}
+		if (!claudeLog.includes("Review result (claude): pass")) {
+			throw new Error(
+				`Expected claude log to contain "Review result (claude): pass" but got: ${claudeLog.substring(0, 200)}...`,
+			);
+		}
 	});
 
 	it("should be handled correctly by ConsoleReporter", async () => {
