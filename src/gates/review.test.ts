@@ -15,11 +15,19 @@ const LOG_DIR = path.join(TEST_DIR, "logs");
 describe("ReviewGateExecutor Logging", () => {
 	let logger: Logger;
 	let executor: ReviewGateExecutor;
+	let originalCI: string | undefined;
+	let originalGithubActions: string | undefined;
 
 	beforeEach(async () => {
 		await fs.mkdir(TEST_DIR, { recursive: true });
 		await fs.mkdir(LOG_DIR, { recursive: true });
 		logger = new Logger(LOG_DIR);
+
+		// Save and disable CI mode for this test to avoid complex git ref issues
+		originalCI = process.env.CI;
+		originalGithubActions = process.env.GITHUB_ACTIONS;
+		delete process.env.CI;
+		delete process.env.GITHUB_ACTIONS;
 
 		// Create a factory function for mock adapters that returns the correct name
 		const createMockAdapter = (name: string): CLIAdapter =>
@@ -108,6 +116,14 @@ describe("ReviewGateExecutor Logging", () => {
 	afterEach(async () => {
 		await fs.rm(TEST_DIR, { recursive: true, force: true });
 		mock.restore();
+
+		// Restore CI env vars
+		if (originalCI !== undefined) {
+			process.env.CI = originalCI;
+		}
+		if (originalGithubActions !== undefined) {
+			process.env.GITHUB_ACTIONS = originalGithubActions;
+		}
 	});
 
 	it("should only create adapter-specific logs and no generic log", async () => {
