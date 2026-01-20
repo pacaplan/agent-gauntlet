@@ -10,24 +10,51 @@ import { Logger } from "../output/logger.js";
 import type { ReviewGateExecutor } from "./review.js";
 
 const TEST_DIR = path.join(process.cwd(), `test-review-logs-${Date.now()}`);
-const LOG_DIR = path.join(TEST_DIR, "logs");
 
 describe("ReviewGateExecutor Logging", () => {
 	let logger: Logger;
 	let executor: ReviewGateExecutor;
 	let originalCI: string | undefined;
 	let originalGithubActions: string | undefined;
+	let originalCwd: string;
 
 	beforeEach(async () => {
 		await fs.mkdir(TEST_DIR, { recursive: true });
-		await fs.mkdir(LOG_DIR, { recursive: true });
-		logger = new Logger(LOG_DIR);
 
 		// Save and disable CI mode for this test to avoid complex git ref issues
 		originalCI = process.env.CI;
 		originalGithubActions = process.env.GITHUB_ACTIONS;
+		originalCwd = process.cwd();
 		delete process.env.CI;
 		delete process.env.GITHUB_ACTIONS;
+
+		// Change to test directory with its own git repo to avoid issues with the main repo
+		process.chdir(TEST_DIR);
+		// Initialize a minimal git repo for the test
+		const { exec } = await import("node:child_process");
+		const { promisify } = await import("node:util");
+		const execAsync = promisify(exec);
+		await execAsync("git init");
+		await execAsync('git config user.email "test@test.com"');
+		await execAsync('git config user.name "Test"');
+		// Create an initial commit so we have a history
+		await fs.writeFile("test.txt", "initial");
+		await execAsync("git add test.txt");
+		await execAsync('git commit -m "initial"');
+		// Create a "main" branch
+		await execAsync("git branch -M main");
+		// Create src directory for our test
+		await fs.mkdir("src", { recursive: true });
+		await fs.writeFile("src/test.ts", "test content");
+		await execAsync("git add src/test.ts");
+		await execAsync('git commit -m "add src"');
+
+		// Make uncommitted changes so the diff isn't empty
+		await fs.writeFile("src/test.ts", "modified test content");
+
+		// Now create the log directory and logger in the test directory
+		await fs.mkdir("logs", { recursive: true });
+		logger = new Logger(path.join(process.cwd(), "logs"));
 
 		// Create a factory function for mock adapters that returns the correct name
 		const createMockAdapter = (name: string): CLIAdapter =>
@@ -68,52 +95,14 @@ describe("ReviewGateExecutor Logging", () => {
 			getValidCLITools: () => ["codex", "claude", "gemini"],
 		}));
 
-		// Mock git commands by mocking child_process.exec directly
-		mock.module("node:child_process", () => ({
-			exec: (
-				cmd: string,
-				_options: unknown,
-				callback?: (
-					error: Error | null,
-					stdout: string,
-					stderr: string,
-				) => void,
-			) => {
-				// Mock all git diff variations
-				let stdout = "";
-				if (cmd.includes("git diff")) stdout = "diff content";
-				else if (cmd.includes("git ls-files")) stdout = "file.ts";
-
-				if (callback) {
-					callback(null, stdout, "");
-				}
-				// biome-ignore lint/suspicious/noExplicitAny: child_process.exec returns ChildProcess which we don't need to fully mock
-				return {} as any;
-			},
-		}));
-
-		// Mock util.promisify to work with our mocked exec
-		mock.module("node:util", () => ({
-			promisify: (fn: (...args: unknown[]) => unknown) => {
-				if (fn.name === "exec") {
-					return async (cmd: string, _options?: unknown) => {
-						// Mock all git diff variations
-						let stdout = "";
-						if (cmd.includes("git diff")) stdout = "diff content";
-						else if (cmd.includes("git ls-files")) stdout = "file.ts";
-						return { stdout, stderr: "" };
-					};
-				}
-				// Fallback for other functions
-				return async (...args: unknown[]) => args[0];
-			},
-		}));
-
 		const { ReviewGateExecutor } = await import("./review.js");
 		executor = new ReviewGateExecutor();
 	});
 
 	afterEach(async () => {
+		// Restore working directory first
+		process.chdir(originalCwd);
+
 		await fs.rm(TEST_DIR, { recursive: true, force: true });
 		mock.restore();
 
@@ -179,7 +168,7 @@ describe("ReviewGateExecutor Logging", () => {
 			);
 		}
 
-		const files = await fs.readdir(LOG_DIR);
+		const files = await fs.readdir("logs");
 		const filesList = files.join(", ");
 
 		if (!files.includes("review_src_code-quality_codex.log")) {
@@ -202,7 +191,7 @@ describe("ReviewGateExecutor Logging", () => {
 
 		// Verify multiplexed content
 		const codexLog = await fs.readFile(
-			path.join(LOG_DIR, "review_src_code-quality_codex.log"),
+			"logs/review_src_code-quality_codex.log",
 			"utf-8",
 		);
 		if (!codexLog.includes("Starting review: code-quality")) {
@@ -217,7 +206,7 @@ describe("ReviewGateExecutor Logging", () => {
 		}
 
 		const claudeLog = await fs.readFile(
-			path.join(LOG_DIR, "review_src_code-quality_claude.log"),
+			"logs/review_src_code-quality_claude.log",
 			"utf-8",
 		);
 		if (!claudeLog.includes("Starting review: code-quality")) {
@@ -234,8 +223,8 @@ describe("ReviewGateExecutor Logging", () => {
 
 	it("should be handled correctly by ConsoleReporter", async () => {
 		const jobId = "review:src:code-quality";
-		const codexPath = path.join(LOG_DIR, "review_src_code-quality_codex.log");
-		const claudePath = path.join(LOG_DIR, "review_src_code-quality_claude.log");
+		const codexPath = "logs/review_src_code-quality_codex.log";
+		const claudePath = "logs/review_src_code-quality_claude.log";
 
 		await fs.writeFile(
 			codexPath,
