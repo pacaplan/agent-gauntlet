@@ -175,6 +175,20 @@ This is useful when you want a specific LLM for certain types of reviews — for
 
 Each job writes a log file under `log_dir` (default: `.gauntlet_logs/`). Filenames are derived from the job id (sanitized).
 
+## CI Setup (Optional)
+
+To run your checks in GitHub Actions:
+
+```bash
+agent-gauntlet ci init
+```
+
+This creates:
+- `.gauntlet/ci.yml` — CI-specific configuration (services, runtimes, setup steps)
+- `.github/workflows/gauntlet.yml` — GitHub Actions workflow file
+
+Your local check definitions (`.gauntlet/checks/*.yml`) are automatically used in CI. The `ci.yml` file lets you configure additional CI-specific settings like database services or runtime versions.
+
 ## Further Reading
 - [User Guide](user-guide.md) — full usage details
 - [Configuration Reference](config-reference.md) — all configuration fields + defaults
