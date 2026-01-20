@@ -9,7 +9,8 @@ All adapters write the prompt (including diff) to a temporary file and pipe it t
 
 ## Common Behavior
 
-- **Dynamic Context**: All agents are instructed via prompt to use their available tools to read files if the provided diff is insufficient.
+- **Dynamic Context**: Agents are invoked in a non-interactive, read-only mode where they can use their own file-reading and search tools to pull additional context from your repository as needed.
+- **Security**: By using standard CLI tools with strict flags (like `--sandbox` or `--allowed-tools`), Agent Gauntlet ensures that agents can read your code to review it without being able to modify your files or escape the repository scope.
 - **Output Parsing**: All agents are instructed to output strict JSON. The `ReviewGateExecutor` parses this JSON to determine pass/fail status.
 
 ---

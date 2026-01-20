@@ -22,31 +22,41 @@ describe("ReviewGateExecutor Logging", () => {
 		logger = new Logger(LOG_DIR);
 
 		// Create a factory function for mock adapters that returns the correct name
-		const createMockAdapter = (name: string): CLIAdapter => ({
-			name,
-			isAvailable: async () => true,
-			checkHealth: async () => ({ status: "healthy" }),
-			// execute returns the raw string output from the LLM, which is then parsed by the executor.
-			// The real adapter returns a string. In this test, we return a JSON string to simulate
-			// the LLM returning structured data. This IS intentional and matches the expected contract
-			// where execute() -> Promise<string>.
-			execute: async () => {
-				await new Promise((r) => setTimeout(r, 1)); // Simulate async work
-				return JSON.stringify({ status: "pass", message: "OK" });
-			},
-			getProjectCommandDir: () => null,
-			getUserCommandDir: () => null,
-			getCommandExtension: () => "md",
-			canUseSymlink: () => false,
-			transformCommand: (c: string) => c,
-		}) as unknown as CLIAdapter;
+		const createMockAdapter = (name: string): CLIAdapter =>
+			({
+				name,
+				isAvailable: async () => true,
+				checkHealth: async () => ({ status: "healthy" }),
+				// execute returns the raw string output from the LLM, which is then parsed by the executor.
+				// The real adapter returns a string. In this test, we return a JSON string to simulate
+				// the LLM returning structured data. This IS intentional and matches the expected contract
+				// where execute() -> Promise<string>.
+				execute: async () => {
+					await new Promise((r) => setTimeout(r, 1)); // Simulate async work
+					return JSON.stringify({ status: "pass", message: "OK" });
+				},
+				getProjectCommandDir: () => null,
+				getUserCommandDir: () => null,
+				getCommandExtension: () => "md",
+				canUseSymlink: () => false,
+				transformCommand: (c: string) => c,
+			}) as unknown as CLIAdapter;
 
 		// Mock getAdapter and other exports that may be imported by other modules
 		mock.module("../cli-adapters/index.js", () => ({
 			getAdapter: (name: string) => createMockAdapter(name),
-			getAllAdapters: () => [createMockAdapter("codex"), createMockAdapter("claude")],
-			getProjectCommandAdapters: () => [createMockAdapter("codex"), createMockAdapter("claude")],
-			getUserCommandAdapters: () => [createMockAdapter("codex"), createMockAdapter("claude")],
+			getAllAdapters: () => [
+				createMockAdapter("codex"),
+				createMockAdapter("claude"),
+			],
+			getProjectCommandAdapters: () => [
+				createMockAdapter("codex"),
+				createMockAdapter("claude"),
+			],
+			getUserCommandAdapters: () => [
+				createMockAdapter("codex"),
+				createMockAdapter("claude"),
+			],
 			getValidCLITools: () => ["codex", "claude", "gemini"],
 		}));
 
@@ -56,8 +66,9 @@ describe("ReviewGateExecutor Logging", () => {
 				// Only mock exec, let others pass (though in this test env we likely only use exec)
 				if (fn.name === "exec") {
 					return async (cmd: string) => {
-						if (/^git diff/.test(cmd)) return { stdout: "diff content" };
-						if (/^git ls-files/.test(cmd)) return { stdout: "file.ts" };
+						// Mock all git diff variations (use includes to catch HEAD^...HEAD and other patterns)
+						if (cmd.includes("git diff")) return { stdout: "diff content" };
+						if (cmd.includes("git ls-files")) return { stdout: "file.ts" };
 						return { stdout: "", stderr: "" };
 					};
 				}

@@ -15,8 +15,47 @@ Then `agent-gauntlet` detects which parts of the repo changed and runs the relev
 
 Agent Gauntlet is designed to be "tool-agnostic" by leveraging the AI CLI tools you already have installed (such as `gemini`, `codex`, or `claude`). Instead of managing its own API keys or subscriptions, it invokes these CLIs directly. This allows you to:
 - **Leverage existing subscriptions**: Use the tools you are already paying for.
-- **Dynamic Context**: Agents are invoked in a non-interactive, read-only mode where they can use their own file-reading and search tools to pull additional context from your repository as needed.
-- **Security**: By using standard CLI tools with strict flags (like `--sandbox` or `--allowed-tools`), Agent Gauntlet ensures that agents can read your code to review it without being able to modify your files or escape the repository scope.
+
+### Usage patterns
+
+#### Planning
+
+My preferred planning tool: Claude Code
+
+High level steps:
+1. Use planning mode to generate a plan doc *in the project dir*.
+2. **From terminal, run `agent-gauntlet run`**
+3. Gauntlet detects that plan document has been added / modified and invokes one or more CLIs to review (I use Gemini, Codex)
+4. Optional: Ask assitant to make changes based on feedback
+
+The plan review configuration and prompt are entirely up to you and your project; my prompt is "Review this plan".
+
+#### AI-Assisted development
+
+> Pair with AI coding assistant to implement a feature.
+
+My preferred assistant: Cursor / Antigravity
+
+High level steps:
+1. Collaborate with assistant to implement code changes
+2. **From chat, run '/gauntlet'**, which tells the assistant to invoke `agent-gauntlet run`
+3. Gauntlet detects which files have changed and runs static checks (linter, tests, etc)
+4. In parallel, Gauntlet invokes one or more CLIs for a code review. Again, the review triggers and prompts are fully configurable.
+5. The assistant waits for Gauntlet to complete, fixes all issues, and then invokes `agent-gauntlet rerun`, which verifies that the previously found issues are fixed and checks for new issues
+6. This process repeats up to three reruns if needed.
+
+#### Agentic implementation
+
+> Delegate well-defined spec to coding agent to autonomously implement.
+
+1. "Program" your agent to auto-run '/gauntlet' when it completes implementation of the feature. This can be done in several ways:
+- Rules, e.g. AGENT.md
+- Commands, e.g. '/my-dev-workflow'
+- Git precommit hook
+- Agent hooks, e.g. Claude Stop event 
+
+High level steps:
+
 
 ### Requirements
 
