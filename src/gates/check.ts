@@ -1,6 +1,6 @@
 import { exec } from "node:child_process";
 import { promisify } from "node:util";
-import type { CheckGateConfig } from "../config/types.js";
+import type { LoadedCheckGateConfig } from "../config/types.js";
 import type { GateResult } from "./result.js";
 
 const execAsync = promisify(exec);
@@ -9,20 +9,24 @@ const MAX_BUFFER_BYTES = 10 * 1024 * 1024;
 export class CheckGateExecutor {
 	async execute(
 		jobId: string,
-		config: CheckGateConfig,
+		config: LoadedCheckGateConfig,
 		workingDirectory: string,
 		logger: (output: string) => Promise<void>,
+		baseBranch?: string,
 	): Promise<GateResult> {
 		const startTime = Date.now();
+
+		// Substitute variables in command
+		const command = this.substituteVariables(config.command, { baseBranch });
 
 		try {
 			await logger(
 				`[${new Date().toISOString()}] Starting check: ${config.name}\n`,
 			);
-			await logger(`Executing command: ${config.command}\n`);
+			await logger(`Executing command: ${command}\n`);
 			await logger(`Working directory: ${workingDirectory}\n\n`);
 
-			const { stdout, stderr } = await execAsync(config.command, {
+			const { stdout, stderr } = await execAsync(command, {
 				cwd: workingDirectory,
 				timeout: config.timeout ? config.timeout * 1000 : undefined,
 				maxBuffer: MAX_BUFFER_BYTES,
@@ -60,8 +64,14 @@ export class CheckGateExecutor {
 					status: "fail",
 					duration: Date.now() - startTime,
 					message: `Timed out after ${config.timeout}s`,
+					fixInstructions: config.fixInstructionsContent,
 				};
 				await logger(`Result: ${result.status} - ${result.message}\n`);
+				if (config.fixInstructionsContent) {
+					await logger(
+						`\n--- Fix Instructions ---\n${config.fixInstructionsContent}\n`,
+					);
+				}
 				return result;
 			}
 
@@ -72,8 +82,14 @@ export class CheckGateExecutor {
 					status: "fail",
 					duration: Date.now() - startTime,
 					message: `Exited with code ${err.code}`,
+					fixInstructions: config.fixInstructionsContent,
 				};
 				await logger(`Result: ${result.status} - ${result.message}\n`);
+				if (config.fixInstructionsContent) {
+					await logger(
+						`\n--- Fix Instructions ---\n${config.fixInstructionsContent}\n`,
+					);
+				}
 				return result;
 			}
 
@@ -83,9 +99,26 @@ export class CheckGateExecutor {
 				status: "error",
 				duration: Date.now() - startTime,
 				message: err.message || "Unknown error",
+				fixInstructions: config.fixInstructionsContent,
 			};
 			await logger(`Result: ${result.status} - ${result.message}\n`);
+			if (config.fixInstructionsContent) {
+				await logger(
+					`\n--- Fix Instructions ---\n${config.fixInstructionsContent}\n`,
+				);
+			}
 			return result;
 		}
+	}
+
+	private substituteVariables(
+		command: string,
+		variables: { baseBranch?: string },
+	): string {
+		let result = command;
+		if (variables.baseBranch) {
+			result = result.replace(/\$\{BASE_BRANCH\}/g, variables.baseBranch);
+		}
+		return result;
 	}
 }

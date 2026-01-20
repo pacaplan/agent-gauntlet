@@ -251,6 +251,14 @@ export class ConsoleReporter {
 			console.log(chalk.dim(`  Log: ${result.logPath}`));
 		}
 
+		if (result.fixInstructions) {
+			console.log(
+				chalk.cyan(
+					`  Fix instructions: available (${result.fixInstructions.split("\n").length} lines)`,
+				),
+			);
+		}
+
 		console.log(""); // Empty line between failures
 	}
 }

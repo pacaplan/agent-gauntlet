@@ -14,6 +14,7 @@ export const checkGateSchema = z
 		run_locally: z.boolean().default(true),
 		timeout: z.number().optional(),
 		fail_fast: z.boolean().optional(),
+		fix_instructions: z.string().optional(), // Path relative to .gauntlet/
 	})
 	.refine(
 		(data) => {
@@ -57,7 +58,7 @@ export const entryPointSchema = z.object({
 
 export const gauntletConfigSchema = z.object({
 	base_branch: z.string().min(1).default("origin/main"),
-	log_dir: z.string().min(1).default(".gauntlet_logs"),
+	log_dir: z.string().min(1).default("gauntlet_logs"),
 	allow_parallel: z.boolean().default(true),
 	cli: cliConfigSchema,
 	entry_points: z.array(entryPointSchema).min(1),

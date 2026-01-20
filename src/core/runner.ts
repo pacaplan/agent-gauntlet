@@ -5,6 +5,7 @@ import path from "node:path";
 import { promisify } from "node:util";
 import { getAdapter } from "../cli-adapters/index.js";
 import type {
+	LoadedCheckGateConfig,
 	LoadedConfig,
 	ReviewGateConfig,
 	ReviewPromptFrontmatter,
@@ -78,11 +79,14 @@ export class Runner {
 		if (job.type === "check") {
 			const logPath = this.logger.getLogPath(job.id);
 			const jobLogger = await this.logger.createJobLogger(job.id);
+			const effectiveBaseBranch =
+				this.baseBranchOverride || this.config.project.base_branch;
 			result = await this.checkExecutor.execute(
 				job.id,
-				job.gateConfig as CheckGateConfig,
+				job.gateConfig as LoadedCheckGateConfig,
 				job.workingDirectory,
 				jobLogger,
+				effectiveBaseBranch,
 			);
 			result.logPath = logPath;
 		} else {
@@ -129,7 +133,7 @@ export class Runner {
 			if (this.shouldStop) break;
 			if (job.type === "check") {
 				const commandName = this.getCommandName(
-					(job.gateConfig as CheckGateConfig).command,
+					(job.gateConfig as LoadedCheckGateConfig).command,
 				);
 				if (!commandName) {
 					preflightResults.push(

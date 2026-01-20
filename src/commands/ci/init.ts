@@ -72,7 +72,7 @@ checks:
 			.join("\n");
 
 		templateContent = templateContent.replace(
-			"# Services will be injected here by agent-gauntlet",
+			"    # Services will be injected here by agent-gauntlet",
 			indentedServices,
 		);
 	} else {

@@ -7,7 +7,11 @@ import {
 	gauntletConfigSchema,
 	reviewPromptFrontmatterSchema,
 } from "./schema.js";
-import type { CheckGateConfig, LoadedConfig } from "./types.js";
+import type {
+	CheckGateConfig,
+	LoadedCheckGateConfig,
+	LoadedConfig,
+} from "./types.js";
 
 const GAUNTLET_DIR = ".gauntlet";
 const CONFIG_FILE = "config.yml";
@@ -31,7 +35,7 @@ export async function loadConfig(
 
 	// 2. Load checks
 	const checksPath = path.join(gauntletPath, CHECKS_DIR);
-	const checks: Record<string, CheckGateConfig> = {};
+	const checks: Record<string, LoadedCheckGateConfig> = {};
 
 	if (await dirExists(checksPath)) {
 		const checkFiles = await fs.readdir(checksPath);
@@ -41,8 +45,51 @@ export async function loadConfig(
 				const content = await fs.readFile(filePath, "utf-8");
 				const raw = YAML.parse(content);
 				// Ensure name matches filename if not provided or just use filename as key
-				const parsed = checkGateSchema.parse(raw);
-				checks[parsed.name] = parsed;
+				const parsed: CheckGateConfig = checkGateSchema.parse(raw);
+
+				// Load fix instructions if specified
+				const loadedCheck: LoadedCheckGateConfig = { ...parsed };
+				if (parsed.fix_instructions) {
+					// Security: Reject absolute paths to prevent reading arbitrary files
+					if (path.isAbsolute(parsed.fix_instructions)) {
+						throw new Error(
+							`Fix instructions path must be relative to .gauntlet/ directory, got absolute path: ${parsed.fix_instructions} (referenced by check "${parsed.name}")`,
+						);
+					}
+
+					// Security: Resolve and validate the path stays within .gauntlet/
+					const fixInstructionsPath = path.resolve(
+						gauntletPath,
+						parsed.fix_instructions,
+					);
+					const normalizedGauntletPath = path.resolve(gauntletPath);
+					const relativePath = path.relative(
+						normalizedGauntletPath,
+						fixInstructionsPath,
+					);
+					// Ensure path doesn't escape .gauntlet/ (no .. segments or absolute paths)
+					if (
+						relativePath.startsWith("..") ||
+						path.isAbsolute(relativePath) ||
+						relativePath === "." ||
+						relativePath === ""
+					) {
+						throw new Error(
+							`Fix instructions path must stay within .gauntlet/ directory and point to a file: ${parsed.fix_instructions} resolves to ${fixInstructionsPath} (referenced by check "${parsed.name}")`,
+						);
+					}
+					if (!(await fileExists(fixInstructionsPath))) {
+						throw new Error(
+							`Fix instructions file not found: ${fixInstructionsPath} (referenced by check "${parsed.name}")`,
+						);
+					}
+					loadedCheck.fixInstructionsContent = await fs.readFile(
+						fixInstructionsPath,
+						"utf-8",
+					);
+				}
+
+				checks[parsed.name] = loadedCheck;
 			}
 		}
 	}
