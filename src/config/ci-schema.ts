@@ -1,5 +1,7 @@
 import { z } from "zod";
 
+// Runtime and service schemas use z.any() to allow flexibility for different CI providers
+// Each provider (GitHub Actions, GitLab CI, etc.) has its own configuration structure
 export const runtimeConfigSchema = z.record(z.string(), z.any());
 
 export const serviceConfigSchema = z.record(z.string(), z.any());

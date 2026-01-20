@@ -14,6 +14,7 @@ export const checkGateSchema = z
 		run_locally: z.boolean().default(true),
 		timeout: z.number().optional(),
 		fail_fast: z.boolean().optional(),
+		fix_instructions: z.string().optional(), // Path relative to .gauntlet/
 	})
 	.refine(
 		(data) => {

@@ -34,9 +34,10 @@ export async function listJobs(): Promise<void> {
 						}
 
 						const workingDirectory = checkDef.working_directory || ep.path;
-						const jobKey = `${check.name}:${workingDirectory}`;
+						// Include entry point in key to ensure each entry point/check pair is distinct
+						const jobKey = `${ep.path}:${check.name}:${workingDirectory}`;
 
-						// Skip if we've already created a job for this check in this working directory
+						// Skip if we've already created a job for this exact entry point/check combination
 						if (seenJobs.has(jobKey)) {
 							continue;
 						}

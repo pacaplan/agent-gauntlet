@@ -43,9 +43,10 @@ export class JobGenerator {
 					if (!isCI && !checkConfig.run_locally) continue;
 
 					const workingDirectory = checkConfig.working_directory || ep.path;
-					const jobKey = `check:${checkName}:${workingDirectory}`;
+					// Include entry point in key to ensure each entry point/check pair is distinct
+					const jobKey = `check:${ep.path}:${checkName}:${workingDirectory}`;
 
-					// Skip if we've already created a job for this check in this working directory
+					// Skip if we've already created a job for this exact entry point/check combination
 					if (seenJobs.has(jobKey)) {
 						continue;
 					}

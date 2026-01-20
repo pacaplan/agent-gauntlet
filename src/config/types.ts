@@ -30,9 +30,14 @@ export type CISetupStep = z.infer<typeof ciSetupStepSchema>;
 export type RuntimeConfig = z.infer<typeof runtimeConfigSchema>;
 export type ServiceConfig = z.infer<typeof serviceConfigSchema>;
 
+// Extended check config with loaded content
+export interface LoadedCheckGateConfig extends CheckGateConfig {
+	fixInstructionsContent?: string;
+}
+
 // Combined type for the fully loaded configuration
 export interface LoadedConfig {
 	project: GauntletConfig;
-	checks: Record<string, CheckGateConfig>;
+	checks: Record<string, LoadedCheckGateConfig>;
 	reviews: Record<string, ReviewGateConfig & ReviewPromptFrontmatter>; // Merged with frontmatter
 }

@@ -7,4 +7,5 @@ export interface GateResult {
 	message?: string; // summary message
 	logPath?: string; // path to full log
 	logPaths?: string[]; // paths to multiple logs (e.g. per-agent logs)
+	fixInstructions?: string; // Markdown content for fixing failures
 }
