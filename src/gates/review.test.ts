@@ -10,60 +10,109 @@ import { Logger } from "../output/logger.js";
 import type { ReviewGateExecutor } from "./review.js";
 
 const TEST_DIR = path.join(process.cwd(), `test-review-logs-${Date.now()}`);
-const LOG_DIR = path.join(TEST_DIR, "logs");
 
 describe("ReviewGateExecutor Logging", () => {
 	let logger: Logger;
 	let executor: ReviewGateExecutor;
+	let originalCI: string | undefined;
+	let originalGithubActions: string | undefined;
+	let originalCwd: string;
 
 	beforeEach(async () => {
 		await fs.mkdir(TEST_DIR, { recursive: true });
-		await fs.mkdir(LOG_DIR, { recursive: true });
-		logger = new Logger(LOG_DIR);
 
-		// Mock getAdapter
+		// Save and disable CI mode for this test to avoid complex git ref issues
+		originalCI = process.env.CI;
+		originalGithubActions = process.env.GITHUB_ACTIONS;
+		originalCwd = process.cwd();
+		delete process.env.CI;
+		delete process.env.GITHUB_ACTIONS;
+
+		// Change to test directory with its own git repo to avoid issues with the main repo
+		process.chdir(TEST_DIR);
+		// Initialize a minimal git repo for the test
+		const { exec } = await import("node:child_process");
+		const { promisify } = await import("node:util");
+		const execAsync = promisify(exec);
+		await execAsync("git init");
+		await execAsync('git config user.email "test@test.com"');
+		await execAsync('git config user.name "Test"');
+		// Create an initial commit so we have a history
+		await fs.writeFile("test.txt", "initial");
+		await execAsync("git add test.txt");
+		await execAsync('git commit -m "initial"');
+		// Create a "main" branch
+		await execAsync("git branch -M main");
+		// Create src directory for our test
+		await fs.mkdir("src", { recursive: true });
+		await fs.writeFile("src/test.ts", "test content");
+		await execAsync("git add src/test.ts");
+		await execAsync('git commit -m "add src"');
+
+		// Make uncommitted changes so the diff isn't empty
+		await fs.writeFile("src/test.ts", "modified test content");
+
+		// Now create the log directory and logger in the test directory
+		await fs.mkdir("logs", { recursive: true });
+		logger = new Logger(path.join(process.cwd(), "logs"));
+
+		// Create a factory function for mock adapters that returns the correct name
+		const createMockAdapter = (name: string): CLIAdapter =>
+			({
+				name,
+				isAvailable: async () => true,
+				checkHealth: async () => ({ status: "healthy" }),
+				// execute returns the raw string output from the LLM, which is then parsed by the executor.
+				// The real adapter returns a string. In this test, we return a JSON string to simulate
+				// the LLM returning structured data. This IS intentional and matches the expected contract
+				// where execute() -> Promise<string>.
+				execute: async () => {
+					await new Promise((r) => setTimeout(r, 1)); // Simulate async work
+					return JSON.stringify({ status: "pass", message: "OK" });
+				},
+				getProjectCommandDir: () => null,
+				getUserCommandDir: () => null,
+				getCommandExtension: () => "md",
+				canUseSymlink: () => false,
+				transformCommand: (c: string) => c,
+			}) as unknown as CLIAdapter;
+
+		// Mock getAdapter and other exports that may be imported by other modules
 		mock.module("../cli-adapters/index.js", () => ({
-			getAdapter: (name: string) =>
-				({
-					name,
-					isAvailable: async () => true,
-					checkHealth: async () => ({ status: "healthy" }),
-					// execute returns the raw string output from the LLM.
-					execute: async () => {
-						await new Promise((r) => setTimeout(r, 1)); // Simulate async work
-						return JSON.stringify({ status: "pass", message: "OK" });
-					},
-					getProjectCommandDir: () => null,
-					getUserCommandDir: () => null,
-					getCommandExtension: () => "md",
-					canUseSymlink: () => false,
-					transformCommand: (c: string) => c,
-				}) as unknown as CLIAdapter,
+			getAdapter: (name: string) => createMockAdapter(name),
+			getAllAdapters: () => [
+				createMockAdapter("codex"),
+				createMockAdapter("claude"),
+			],
+			getProjectCommandAdapters: () => [
+				createMockAdapter("codex"),
+				createMockAdapter("claude"),
+			],
+			getUserCommandAdapters: () => [
+				createMockAdapter("codex"),
+				createMockAdapter("claude"),
+			],
+			getValidCLITools: () => ["codex", "claude", "gemini"],
 		}));
 
-		// Mock git commands via util.promisify(exec)
-		mock.module("node:util", () => ({
-			promisify: (fn: (...args: unknown[]) => unknown) => {
-				// We assume the first argument to promisify in ReviewGateExecutor is 'exec'
-				// We can't easily check fn.name because it might be bound or different in Bun
-				return async (cmd: string) => {
-					if (typeof cmd === "string") {
-						if (/^git diff/.test(cmd)) return { stdout: "diff content" };
-						if (/^git ls-files/.test(cmd)) return { stdout: "file.ts" };
-					}
-					return { stdout: "", stderr: "" };
-				};
-			},
-		}));
-
-		// Dynamic import to pick up the mocks
 		const { ReviewGateExecutor } = await import("./review.js");
 		executor = new ReviewGateExecutor();
 	});
 
 	afterEach(async () => {
+		// Restore working directory first
+		process.chdir(originalCwd);
+
 		await fs.rm(TEST_DIR, { recursive: true, force: true });
 		mock.restore();
+
+		// Restore CI env vars
+		if (originalCI !== undefined) {
+			process.env.CI = originalCI;
+		}
+		if (originalGithubActions !== undefined) {
+			process.env.GITHUB_ACTIONS = originalGithubActions;
+		}
 	});
 
 	it("should only create adapter-specific logs and no generic log", async () => {
@@ -76,6 +125,10 @@ describe("ReviewGateExecutor Logging", () => {
 
 		const loggerFactory = logger.createLoggerFactory(jobId);
 
+		// We need to mock getDiff since it uses execAsync which we mocked
+		// Actually ReviewGateExecutor is a class, we can mock its private method if needed
+		// or just let it run if the mock promisify works.
+
 		const result = await executor.execute(
 			jobId,
 			config,
@@ -84,35 +137,94 @@ describe("ReviewGateExecutor Logging", () => {
 			"main",
 		);
 
-		expect(result.status).toBe("pass");
-		expect(result.logPaths).toBeDefined();
-		expect(result.logPaths).toHaveLength(2);
+		// Enhanced error messages for better debugging
+		if (result.status !== "pass") {
+			throw new Error(
+				`Expected result.status to be "pass" but got "${result.status}". Message: ${result.message || "none"}. Duration: ${result.duration}ms`,
+			);
+		}
 
-		const files = await fs.readdir(LOG_DIR);
-		expect(files).toContain("review_src_code-quality_codex.log");
-		expect(files).toContain("review_src_code-quality_claude.log");
-		expect(files).not.toContain("review_src_code-quality.log");
+		if (!result.logPaths) {
+			throw new Error(
+				`Expected result.logPaths to be defined but got ${JSON.stringify(result.logPaths)}`,
+			);
+		}
+
+		if (result.logPaths.length !== 2) {
+			throw new Error(
+				`Expected result.logPaths to have length 2 but got ${result.logPaths.length}. Paths: ${JSON.stringify(result.logPaths)}`,
+			);
+		}
+
+		if (!result.logPaths[0]?.includes("review_src_code-quality_codex.log")) {
+			throw new Error(
+				`Expected result.logPaths[0] to contain "review_src_code-quality_codex.log" but got "${result.logPaths[0]}"`,
+			);
+		}
+
+		if (!result.logPaths[1]?.includes("review_src_code-quality_claude.log")) {
+			throw new Error(
+				`Expected result.logPaths[1] to contain "review_src_code-quality_claude.log" but got "${result.logPaths[1]}"`,
+			);
+		}
+
+		const files = await fs.readdir("logs");
+		const filesList = files.join(", ");
+
+		if (!files.includes("review_src_code-quality_codex.log")) {
+			throw new Error(
+				`Expected log directory to contain "review_src_code-quality_codex.log" but only found: [${filesList}]`,
+			);
+		}
+
+		if (!files.includes("review_src_code-quality_claude.log")) {
+			throw new Error(
+				`Expected log directory to contain "review_src_code-quality_claude.log" but only found: [${filesList}]`,
+			);
+		}
+
+		if (files.includes("review_src_code-quality.log")) {
+			throw new Error(
+				`Expected log directory NOT to contain generic log "review_src_code-quality.log" but it was found. All files: [${filesList}]`,
+			);
+		}
 
 		// Verify multiplexed content
 		const codexLog = await fs.readFile(
-			path.join(LOG_DIR, "review_src_code-quality_codex.log"),
+			"logs/review_src_code-quality_codex.log",
 			"utf-8",
 		);
-		expect(codexLog).toContain("Starting review: code-quality");
-		expect(codexLog).toContain("Review result (codex): pass");
+		if (!codexLog.includes("Starting review: code-quality")) {
+			throw new Error(
+				`Expected codex log to contain "Starting review: code-quality" but got: ${codexLog.substring(0, 200)}...`,
+			);
+		}
+		if (!codexLog.includes("Review result (codex): pass")) {
+			throw new Error(
+				`Expected codex log to contain "Review result (codex): pass" but got: ${codexLog.substring(0, 200)}...`,
+			);
+		}
 
 		const claudeLog = await fs.readFile(
-			path.join(LOG_DIR, "review_src_code-quality_claude.log"),
+			"logs/review_src_code-quality_claude.log",
 			"utf-8",
 		);
-		expect(claudeLog).toContain("Starting review: code-quality");
-		expect(claudeLog).toContain("Review result (claude): pass");
+		if (!claudeLog.includes("Starting review: code-quality")) {
+			throw new Error(
+				`Expected claude log to contain "Starting review: code-quality" but got: ${claudeLog.substring(0, 200)}...`,
+			);
+		}
+		if (!claudeLog.includes("Review result (claude): pass")) {
+			throw new Error(
+				`Expected claude log to contain "Review result (claude): pass" but got: ${claudeLog.substring(0, 200)}...`,
+			);
+		}
 	});
 
 	it("should be handled correctly by ConsoleReporter", async () => {
 		const jobId = "review:src:code-quality";
-		const codexPath = path.join(LOG_DIR, "review_src_code-quality_codex.log");
-		const claudePath = path.join(LOG_DIR, "review_src_code-quality_claude.log");
+		const codexPath = "logs/review_src_code-quality_codex.log";
+		const claudePath = "logs/review_src_code-quality_claude.log";
 
 		await fs.writeFile(
 			codexPath,
@@ -152,6 +264,7 @@ Violations:
 		// We can access extractFailureDetails directly as it is public
 		const details = await reporter.extractFailureDetails(result);
 
+		// Check for presence of key information rather than exact counts
 		expect(
 			details.some(
 				(d: string) =>

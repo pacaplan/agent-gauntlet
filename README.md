@@ -16,58 +16,46 @@ Then `agent-gauntlet` detects which parts of the repo changed and runs the relev
 Agent Gauntlet is designed to be "tool-agnostic" by leveraging the AI CLI tools you already have installed (such as `gemini`, `codex`, or `claude`). Instead of managing its own API keys or subscriptions, it invokes these CLIs directly. This allows you to:
 - **Leverage existing subscriptions**: Use the tools you are already paying for.
 
-### Usage Patterns
+### Usage patterns
 
-Agent Gauntlet supports three primary usage patterns, each suited for different development workflows.
+#### Planning
 
-#### 1. Planning Mode
+My preferred planning tool: Claude Code
 
-**Use case:** Generate and review high-level implementation plans before coding.
+High level steps:
+1. Use planning mode to generate a plan doc *in the project dir*.
+2. **From terminal, run `agent-gauntlet run`**
+3. Gauntlet detects that plan document has been added / modified and invokes one or more CLIs to review (I use Gemini, Codex)
+4. Optional: Ask assitant to make changes based on feedback
 
-**Problem Gauntlet solves:** Without early review, implementation plans can miss edge cases, architectural issues, or misunderstand requirements. Catching these problems before coding saves significant rework time.
+The plan review configuration and prompt are entirely up to you and your project; my prompt is "Review this plan".
 
-**Workflow:**
+#### AI-Assisted development
 
-1. Create a plan document in your project directory
-2. Run `agent-gauntlet run` from the terminal
-3. Gauntlet detects the new or modified plan and invokes configured AI CLIs to review it
-4. *(Optional)* Ask your assistant to refine the plan based on review feedback
+> Pair with AI coding assistant to implement a feature.
 
-**Note:** Review configuration and prompts are fully customizable. Example prompt: *"Review this plan for completeness and potential issues."*
+My preferred assistant: Cursor / Antigravity
 
-#### 2. AI-Assisted Development
+High level steps:
+1. Collaborate with assistant to implement code changes
+2. **From chat, run '/gauntlet'**, which tells the assistant to invoke `agent-gauntlet run`
+3. Gauntlet detects which files have changed and runs static checks (linter, tests, etc)
+4. In parallel, Gauntlet invokes one or more CLIs for a code review. Again, the review triggers and prompts are fully configurable.
+5. The assistant waits for Gauntlet to complete, fixes all issues, and then invokes `agent-gauntlet rerun`, which verifies that the previously found issues are fixed and checks for new issues
+6. This process repeats up to three reruns if needed.
 
-**Use case:** Pair with an AI coding assistant to implement features with continuous quality checks.
+#### Agentic implementation
 
-**Problem Gauntlet solves:** AI assistants can introduce bugs, style violations, or logic errors that aren't immediately obvious. Gauntlet provides automated quality checks and review from a different LLM perspective, catching issues before they reach production.
+> Delegate well-defined spec to coding agent to autonomously implement.
 
-**Workflow:**
+1. "Program" your agent to auto-run '/gauntlet' when it completes implementation of the feature. This can be done in several ways:
+- Rules, e.g. AGENT.md
+- Commands, e.g. '/my-dev-workflow'
+- Git precommit hook
+- Agent hooks, e.g. Claude Stop event 
 
-1. Collaborate with your assistant to implement code changes
-2. Run `/gauntlet` from chat
-3. Gauntlet detects changed files and runs configured checks (linter, tests, type checking, etc.)
-4. Simultaneously, Gauntlet invokes AI CLIs for code review
-5. Assistant reviews results, fixes identified issues, and runs `agent-gauntlet rerun`
-6. Gauntlet verifies fixes and checks for new issues
-7. Process repeats automatically (up to 3 reruns) until all gates pass
+High level steps:
 
-#### 3. Agentic Implementation
-
-**Use case:** Delegate well-defined tasks to a coding agent for autonomous implementation.
-
-**Problem Gauntlet solves:** Agents working autonomously may complete tasks without proper validation. Without human oversight, subtle bugs or quality issues can slip through. Gauntlet enables fully autonomous development with built-in quality gates and multi-LLM review.
-
-**Workflow:**
-
-1. Configure your agent to automatically run `/gauntlet` after completing implementation:
-   - **Rules files:** Add to `.cursorrules`, `AGENT.md`, or similar
-   - **Custom commands:** Create a `/my-dev-workflow` that includes gauntlet
-   - **Git hooks:** Use pre-commit hooks to trigger gauntlet
-   - **Agent hooks:** Leverage platform features (e.g., Claude's Stop event)
-2. Assign the task to your agent and step away
-3. When you return: the task is complete, reviewed by a different LLM, all issues fixed, and CI checks passing
-
-**Benefit:** Fully autonomous quality assurance without manual intervention.
 
 ### Requirements
 
