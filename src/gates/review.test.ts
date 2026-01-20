@@ -60,20 +60,44 @@ describe("ReviewGateExecutor Logging", () => {
 			getValidCLITools: () => ["codex", "claude", "gemini"],
 		}));
 
-		// Mock git commands via util.promisify(exec)
+		// Mock git commands by mocking child_process.exec directly
+		mock.module("node:child_process", () => ({
+			exec: (
+				cmd: string,
+				_options: unknown,
+				callback?: (
+					error: Error | null,
+					stdout: string,
+					stderr: string,
+				) => void,
+			) => {
+				// Mock all git diff variations
+				let stdout = "";
+				if (cmd.includes("git diff")) stdout = "diff content";
+				else if (cmd.includes("git ls-files")) stdout = "file.ts";
+
+				if (callback) {
+					callback(null, stdout, "");
+				}
+				// biome-ignore lint/suspicious/noExplicitAny: child_process.exec returns ChildProcess which we don't need to fully mock
+				return {} as any;
+			},
+		}));
+
+		// Mock util.promisify to work with our mocked exec
 		mock.module("node:util", () => ({
 			promisify: (fn: (...args: unknown[]) => unknown) => {
-				// Only mock exec, let others pass (though in this test env we likely only use exec)
 				if (fn.name === "exec") {
-					return async (cmd: string) => {
-						// Mock all git diff variations (use includes to catch HEAD^...HEAD and other patterns)
-						if (cmd.includes("git diff")) return { stdout: "diff content" };
-						if (cmd.includes("git ls-files")) return { stdout: "file.ts" };
-						return { stdout: "", stderr: "" };
+					return async (cmd: string, _options?: unknown) => {
+						// Mock all git diff variations
+						let stdout = "";
+						if (cmd.includes("git diff")) stdout = "diff content";
+						else if (cmd.includes("git ls-files")) stdout = "file.ts";
+						return { stdout, stderr: "" };
 					};
 				}
-				// Fallback for other functions if needed
-				return async () => {};
+				// Fallback for other functions
+				return async (...args: unknown[]) => args[0];
 			},
 		}));
 
