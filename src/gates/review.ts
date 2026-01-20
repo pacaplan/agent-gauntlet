@@ -370,6 +370,13 @@ export class ReviewGateExecutor {
 		}
 
 		// Create per-adapter logger
+		// Defensive check: ensure adapter name is valid
+		if (!adapter.name || typeof adapter.name !== "string") {
+			await mainLogger(
+				`Error: Invalid adapter name: ${JSON.stringify(adapter.name)}\n`,
+			);
+			return null;
+		}
 		const adapterLogger = await getAdapterLogger(adapter.name);
 
 		try {

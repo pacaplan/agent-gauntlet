@@ -28,10 +28,12 @@ export class Logger {
 	}
 
 	private async initFile(logPath: string): Promise<void> {
-		if (!this.initializedFiles.has(logPath)) {
-			await fs.writeFile(logPath, "");
-			this.initializedFiles.add(logPath);
+		if (this.initializedFiles.has(logPath)) {
+			return;
 		}
+		// Add to set BEFORE writing to make this more atomic
+		this.initializedFiles.add(logPath);
+		await fs.writeFile(logPath, "");
 	}
 
 	async createJobLogger(

@@ -21,27 +21,33 @@ describe("ReviewGateExecutor Logging", () => {
 		await fs.mkdir(LOG_DIR, { recursive: true });
 		logger = new Logger(LOG_DIR);
 
-		// Mock getAdapter
+		// Create a factory function for mock adapters that returns the correct name
+		const createMockAdapter = (name: string): CLIAdapter => ({
+			name,
+			isAvailable: async () => true,
+			checkHealth: async () => ({ status: "healthy" }),
+			// execute returns the raw string output from the LLM, which is then parsed by the executor.
+			// The real adapter returns a string. In this test, we return a JSON string to simulate
+			// the LLM returning structured data. This IS intentional and matches the expected contract
+			// where execute() -> Promise<string>.
+			execute: async () => {
+				await new Promise((r) => setTimeout(r, 1)); // Simulate async work
+				return JSON.stringify({ status: "pass", message: "OK" });
+			},
+			getProjectCommandDir: () => null,
+			getUserCommandDir: () => null,
+			getCommandExtension: () => "md",
+			canUseSymlink: () => false,
+			transformCommand: (c: string) => c,
+		}) as unknown as CLIAdapter;
+
+		// Mock getAdapter and other exports that may be imported by other modules
 		mock.module("../cli-adapters/index.js", () => ({
-			getAdapter: (name: string) =>
-				({
-					name,
-					isAvailable: async () => true,
-					checkHealth: async () => ({ status: "healthy" }),
-					// execute returns the raw string output from the LLM, which is then parsed by the executor.
-					// The real adapter returns a string. In this test, we return a JSON string to simulate
-					// the LLM returning structured data. This IS intentional and matches the expected contract
-					// where execute() -> Promise<string>.
-					execute: async () => {
-						await new Promise((r) => setTimeout(r, 1)); // Simulate async work
-						return JSON.stringify({ status: "pass", message: "OK" });
-					},
-					getProjectCommandDir: () => null,
-					getUserCommandDir: () => null,
-					getCommandExtension: () => "md",
-					canUseSymlink: () => false,
-					transformCommand: (c: string) => c,
-				}) as unknown as CLIAdapter,
+			getAdapter: (name: string) => createMockAdapter(name),
+			getAllAdapters: () => [createMockAdapter("codex"), createMockAdapter("claude")],
+			getProjectCommandAdapters: () => [createMockAdapter("codex"), createMockAdapter("claude")],
+			getUserCommandAdapters: () => [createMockAdapter("codex"), createMockAdapter("claude")],
+			getValidCLITools: () => ["codex", "claude", "gemini"],
 		}));
 
 		// Mock git commands via util.promisify(exec)
