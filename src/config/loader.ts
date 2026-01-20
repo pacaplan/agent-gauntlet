@@ -50,10 +50,34 @@ export async function loadConfig(
 				// Load fix instructions if specified
 				const loadedCheck: LoadedCheckGateConfig = { ...parsed };
 				if (parsed.fix_instructions) {
-					const fixInstructionsPath = path.join(
+					// Security: Reject absolute paths to prevent reading arbitrary files
+					if (path.isAbsolute(parsed.fix_instructions)) {
+						throw new Error(
+							`Fix instructions path must be relative to .gauntlet/ directory, got absolute path: ${parsed.fix_instructions} (referenced by check "${parsed.name}")`,
+						);
+					}
+
+					// Security: Resolve and validate the path stays within .gauntlet/
+					const fixInstructionsPath = path.resolve(
 						gauntletPath,
 						parsed.fix_instructions,
 					);
+					const normalizedGauntletPath = path.resolve(gauntletPath);
+					const relativePath = path.relative(
+						normalizedGauntletPath,
+						fixInstructionsPath,
+					);
+					// Ensure path doesn't escape .gauntlet/ (no .. segments or absolute paths)
+					if (
+						relativePath.startsWith("..") ||
+						path.isAbsolute(relativePath) ||
+						relativePath === "." ||
+						relativePath === ""
+					) {
+						throw new Error(
+							`Fix instructions path must stay within .gauntlet/ directory and point to a file: ${parsed.fix_instructions} resolves to ${fixInstructionsPath} (referenced by check "${parsed.name}")`,
+						);
+					}
 					if (!(await fileExists(fixInstructionsPath))) {
 						throw new Error(
 							`Fix instructions file not found: ${fixInstructionsPath} (referenced by check "${parsed.name}")`,

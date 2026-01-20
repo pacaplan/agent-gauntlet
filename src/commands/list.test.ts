@@ -37,7 +37,7 @@ describe("List Command", () => {
 			path.join(GAUNTLET_DIR, "config.yml"),
 			`
 base_branch: origin/main
-log_dir: .gauntlet_logs
+log_dir: gauntlet_logs
 cli:
   default_preference:
     - gemini

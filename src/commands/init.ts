@@ -16,7 +16,7 @@ allowed-tools: Bash
 Execute the autonomous verification suite.
 
 1. Run \`agent-gauntlet run\`.
-2. If it fails, read the log files in \`.gauntlet_logs/\` to understand exactly what went wrong.
+2. If it fails, read the log files in \`gauntlet_logs/\` to understand exactly what went wrong.
 3. Fix any code or logic errors found by the tools or AI reviewers, prioritizing higher-priority violations (critical > high > medium > low).
 4. If you disagree with AI reviewer feedback, briefly explain your reasoning in the code comments rather than ignoring it silently.
 5. Do NOT commit your changes yet—keep them uncommitted so the rerun command can review them.
@@ -336,7 +336,7 @@ function generateConfigYml(config: InitConfig): string {
       - code-quality`;
 
 	return `base_branch: origin/main
-log_dir: .gauntlet_logs
+log_dir: gauntlet_logs
 
 # Run gates in parallel when possible (default: true)
 # allow_parallel: true

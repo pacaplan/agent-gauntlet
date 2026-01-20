@@ -8,7 +8,7 @@ Execute the autonomous verification suite.
 1. Run `agent-gauntlet run`.
 2. If it fails:
    - Check the console output for "Fix instructions: available" messages.
-   - Read the log files in `.gauntlet_logs/` to understand exactly what went wrong.
+   - Read the log files in `gauntlet_logs/` to understand exactly what went wrong.
    - If fix instructions are available, they will be in the log file under a "--- Fix Instructions ---" section—carefully read and apply them FIRST before attempting other fixes.
 3. Fix any code or logic errors found by the tools or AI reviewers, prioritizing higher-priority violations (critical > high > medium > low).
 4. If you disagree with AI reviewer feedback, briefly explain your reasoning in the code comments rather than ignoring it silently.

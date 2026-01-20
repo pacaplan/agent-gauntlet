@@ -20,7 +20,7 @@ export async function rotateLogs(logDir: string): Promise<void> {
 			return;
 		}
 
-		// 2. Clear .gauntlet_logs/previous if it exists
+		// 2. Clear gauntlet_logs/previous if it exists
 		if (await exists(previousDir)) {
 			const previousFiles = await fs.readdir(previousDir);
 			await Promise.all(
@@ -32,7 +32,7 @@ export async function rotateLogs(logDir: string): Promise<void> {
 			await fs.mkdir(previousDir, { recursive: true });
 		}
 
-		// 3. Move all existing files in .gauntlet_logs/ to .gauntlet_logs/previous
+		// 3. Move all existing files in gauntlet_logs/ to gauntlet_logs/previous
 		const files = await fs.readdir(logDir);
 		await Promise.all(
 			files

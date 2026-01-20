@@ -111,7 +111,7 @@ Uses the same options as `run` (see above). When using `--gate <name>`, filters 
 
 Reruns gates with previous failures as context, defaulting to uncommitted changes only.
 
-- Parses previous failures from log files in `.gauntlet_logs/`
+- Parses previous failures from log files in `gauntlet_logs/`
 - Injects previous violations as context for review gates, helping reviewers verify fixes
 - Defaults to reviewing only uncommitted changes (unlike `run` which compares against `base_branch`)
 
@@ -279,7 +279,7 @@ Notes:
 
 The branch/ref to diff against in local runs.
 
-### `log_dir` (string, default: `.gauntlet_logs`)
+### `log_dir` (string, default: `gauntlet_logs`)
 
 Directory where job logs are written.
 
@@ -368,7 +368,7 @@ The agent is also granted read-only access to the repository to dynamically fetc
 
 ## Logs
 
-Each job writes a log file under `log_dir` (default: `.gauntlet_logs/`), including:
+Each job writes a log file under `log_dir` (default: `gauntlet_logs/`), including:
 - the command/tool used
 - full stdout/stderr (checks)
 - review output per tool (reviews)

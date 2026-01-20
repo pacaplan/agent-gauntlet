@@ -81,7 +81,7 @@ Here's a real-world configuration from the Agent Gauntlet project itself:
 
 ```yaml
 base_branch: origin/main
-log_dir: .gauntlet_logs
+log_dir: gauntlet_logs
 allow_parallel: true
 cli:
   default_preference:
@@ -173,7 +173,7 @@ This is useful when you want a specific LLM for certain types of reviews — for
 
 ## Logs
 
-Each job writes a log file under `log_dir` (default: `.gauntlet_logs/`). Filenames are derived from the job id (sanitized).
+Each job writes a log file under `log_dir` (default: `gauntlet_logs/`). Filenames are derived from the job id (sanitized).
 
 ## CI Setup (Optional)
 
