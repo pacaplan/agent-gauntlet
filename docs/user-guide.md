@@ -182,6 +182,25 @@ Once installed, you can run `/gauntlet` directly in your CLI agent session to ex
 
 - `-y, --yes`: Skip prompts and use defaults (project-level commands for all supported agents)
 
+### `agent-gauntlet ci`
+
+Commands for integrating Agent Gauntlet with CI/CD systems (GitHub Actions).
+
+#### `agent-gauntlet ci init`
+
+Generates a dynamic GitHub Actions workflow (`.github/workflows/gauntlet.yml`) and a starter CI configuration (`.gauntlet/ci.yml`).
+
+- The generated workflow uses a "discover" job to dynamically build the job matrix based on changed files and configured checks.
+- You generally only need to run this once, or when you add new service dependencies (e.g. Postgres, Redis) to `.gauntlet/ci.yml`.
+
+#### `agent-gauntlet ci list-jobs`
+
+Internal command used by the CI workflow to discover which jobs to run.
+
+- Reads `.gauntlet/ci.yml` and `.gauntlet/config.yml`
+- Expands entry points based on file patterns
+- Outputs a JSON object defining the job matrix and service configurations
+
 ### `agent-gauntlet help`
 
 Shows help information, including an overview of Agent Gauntlet and all available commands. This is the default command when no command is provided.

@@ -32,6 +32,7 @@ export class Runner {
 		private reporter: ConsoleReporter,
 		private previousFailuresMap?: Map<string, Map<string, PreviousViolation[]>>,
 		private changeOptions?: { commit?: string; uncommitted?: boolean },
+		private baseBranchOverride?: string,
 	) {}
 
 	async run(jobs: Job[]): Promise<boolean> {
@@ -89,12 +90,14 @@ export class Runner {
 			const safeJobId = sanitizeJobId(job.id);
 			const previousFailures = this.previousFailuresMap?.get(safeJobId);
 			const loggerFactory = this.logger.createLoggerFactory(job.id);
+			const effectiveBaseBranch =
+				this.baseBranchOverride || this.config.project.base_branch;
 			result = await this.reviewExecutor.execute(
 				job.id,
 				job.gateConfig as ReviewGateConfig & ReviewPromptFrontmatter,
 				job.entryPoint,
 				loggerFactory,
-				this.config.project.base_branch,
+				effectiveBaseBranch,
 				previousFailures,
 				this.changeOptions,
 				this.config.project.cli.check_usage_limit,

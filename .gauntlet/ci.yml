@@ -1,0 +1,23 @@
+runtimes:
+  bun:
+    version: "latest"
+
+setup:
+  - name: Install Dependencies
+    run: bun install
+
+checks:
+  - name: lint
+    requires_runtimes: [bun]
+
+  - name: test
+    requires_runtimes: [bun]
+
+  - name: security-deps
+    requires_runtimes: [bun]
+
+  - name: security-code
+    requires_runtimes: [bun]
+    setup:
+      - name: Install Semgrep
+        run: python3 -m pip install semgrep

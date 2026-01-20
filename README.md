@@ -1,122 +1,90 @@
 # Agent Gauntlet
 
-Agent Gauntlet is a configurable “quality gate” runner for AI-assisted development workflows.
+> Don't just review the agent's code — put it through the gauntlet.
 
-You define:
-- **Entry points** (paths in your repo)
-- **Check gates** (shell commands: tests, linters, typecheck, etc.)
-- **Review gates** (AI CLI tools run on diffs, with regex-based pass/fail)
+Agent Gauntlet is a configurable “feedback loop” runner for AI-assisted development workflows.
 
-Then `agent-gauntlet` detects which parts of the repo changed and runs the relevant gates.
+You configure which paths in your repo should trigger which validations — shell commands like tests and linters, plus AI-powered code reviews. When files change, Gauntlet automatically runs the relevant validations and reports results.
 
-### AI CLI Integration
+For AI reviews, it uses the CLI tool of your choice: Gemini, Codex, Claude Code, GitHub Copilot, or Cursor. 
 
-Agent Gauntlet is designed to be "tool-agnostic" by leveraging the AI CLI tools you already have installed (such as `gemini`, `codex`, or `claude`). Instead of managing its own API keys or subscriptions, it invokes these CLIs directly. This allows you to:
-- **Leverage existing subscriptions**: Use the tools you are already paying for.
-- **Dynamic Context**: Agents are invoked in a non-interactive, read-only mode where they can use their own file-reading and search tools to pull additional context from your repository as needed.
-- **Security**: By using standard CLI tools with strict flags (like `--sandbox` or `--allowed-tools`), Agent Gauntlet ensures that agents can read your code to review it without being able to modify your files or escape the repository scope.
+## Features
 
-### Requirements
+- **Agent validation loop**: Keep your coding agent on track with automated feedback loops. Detect problems — deterministically and/or non-deterministically — and let your agent fix and Gauntlet verify.
+- **Multi-agent collaboration**: Enable one AI agent to automatically request code reviews from another. For example, if Claude made changes, Gauntlet can request a review from Codex or Gemini — spreading token usage across your subscriptions instead of burning through one.
+- **Leverage existing subscriptions**: Agent Gauntlet is *free* and tool-agnostic, leveraging the AI CLI tools you already have installed.
+- **Easy CI setup**: Define your checks once, run them locally and in GitHub.
 
-- **Bun** (Required runtime, v1.0.0+)
-- **git** (change detection and diffs)
-- For review gates: one or more supported AI CLIs installed (`gemini`, `codex`, `claude`, `github-copilot`, `cursor`). For the full list of tools and how they are used, see [CLI Invocation Details](docs/cli-invocation-details.md)
+## Usage Patterns
 
-### Installation
+Agent Gauntlet supports three primary usage patterns, each suited for different development workflows:
+1. Run CLI: `agent-gauntlet run`
+2. Run agent command: `/gauntlet`
+3. Automatically run after agent completes task
 
-You can install `agent-gauntlet` globally using `npm` or `bun` (Bun must be installed on the system in both cases):
+The use cases below illustrate when each of these patterns may be used.
 
-**Using Bun (Recommended):**
-```bash
-bun add -g agent-gauntlet
-```
+### 1. Planning Mode
 
-**Using npm:**
-```bash
-npm install -g agent-gauntlet
-```
+**Use case:** Generate and review high-level implementation plans before coding.
 
-### Quick start
+**Problem Gauntlet solves:** Catch architectural issues and requirement misunderstandings before coding to avoid costly rework.
 
-- **Initialize configuration**
+**Workflow:**
 
-```bash
-agent-gauntlet init
-```
+1. Create a plan document in your project directory
+2. Run `agent-gauntlet run` from the terminal
+3. Gauntlet detects the new or modified plan and invokes configured AI CLIs to review it
+4. *(Optional)* Ask your assistant to refine the plan based on review feedback
 
-- **Run gates**
+**Note:** Review configuration and prompts are fully customizable. Example prompt: *"Review this plan for completeness and potential issues."*
 
-```bash
-agent-gauntlet
-```
+### 2. AI-Assisted Development
 
-### Development
+**Use case:** Pair with an AI coding assistant to implement features with continuous quality checks.
 
-- **Install dependencies**
+**Problem Gauntlet solves:** Catch AI-introduced bugs and quality issues through automated checks and multi-LLM review.
 
-```bash
-bun install
-```
+**Workflow:**
 
-- **Build the CLI binary**
+1. Collaborate with your assistant to implement code changes
+2. Run `/gauntlet` from chat
+3. Gauntlet detects changed files and runs configured checks (linter, tests, type checking, etc.)
+4. Simultaneously, Gauntlet invokes AI CLIs for code review
+5. Assistant reviews results, fixes identified issues, and runs `agent-gauntlet rerun`
+6. Gauntlet verifies fixes and checks for new issues
+7. Process repeats automatically (up to 3 reruns) until all gates pass
 
-```bash
-bun run build
-```
+### 3. Agentic Implementation
 
-### Basic usage
+**Use case:** Delegate well-defined tasks to a coding agent for autonomous implementation.
 
-- **Run gates for detected changes**
+**Problem Gauntlet solves:** Enable autonomous agent development with built-in quality gates, eliminating the validation gap when humans aren't in the loop.
 
-```bash
-agent-gauntlet run
-```
+**Workflow:**
 
-- **Run only one gate name** (runs it across all applicable entry points)
+1. Configure your agent to automatically run `/gauntlet` after completing implementation:
+   - **Rules files:** Add to `.cursorrules`, `AGENT.md`, or similar
+   - **Custom commands:** Create a `/my-dev-workflow` that includes gauntlet
+   - **Git hooks:** Use pre-commit hooks to trigger gauntlet
+   - **Agent hooks:** Leverage platform features (e.g., Claude's Stop event)
+2. Assign the task to your agent and step away
+3. When you return: the task is complete, reviewed by a different LLM, all issues fixed, and CI checks passing
 
-```bash
-agent-gauntlet run --gate lint
-```
+**Benefit:** Fully autonomous quality assurance without manual intervention.
 
-- **List configured gates and entry points**
+## Quick Start
 
-```bash
-agent-gauntlet list
-```
+1. **Install**: `bun add -g agent-gauntlet`
+2. **Initialize**: `agent-gauntlet init`
+3. **Run**: `agent-gauntlet run`
 
-- **Check which AI CLIs are installed**
+For basic usage and configuration guide, see the [Quick Start Guide](docs/quick-start.md).
 
-```bash
-agent-gauntlet health
-```
+## Documentation
 
-### Agent loop rules
-
-The `.gauntlet/run_gauntlet.md` file defines how AI agents should interact with the gauntlet. By default, agents will terminate after 4 runs (1 initial + 3 fix attempts). You can increase this limit by manually editing the termination conditions in that file.
-
-### Configuration layout
-
-Agent Gauntlet loads configuration from your repository:
-
-```text
-.gauntlet/
-  config.yml
-  checks/
-    *.yml
-  reviews/
-    *.md
-```
-
-- **Project config**: `.gauntlet/config.yml`
-- **Check definitions**: `.gauntlet/checks/*.yml`
-- **Review definitions**: `.gauntlet/reviews/*.md` (filename is the review gate name)
-
-### Logs
-
-Each job writes a log file under `log_dir` (default: `.gauntlet_logs/`). Filenames are derived from the job id (sanitized).
-
-### Documentation
-
+- [Quick Start Guide](docs/quick-start.md) — installation, basic usage, and config layout
 - [User Guide](docs/user-guide.md) — full usage details
 - [Configuration Reference](docs/config-reference.md) — all configuration fields + defaults
 - [CLI Invocation Details](docs/cli-invocation-details.md) — how we securely invoke AI CLIs
+- [Development Guide](docs/development.md) — how to build and develop this project

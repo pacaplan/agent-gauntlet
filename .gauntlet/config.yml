@@ -3,10 +3,10 @@ log_dir: .gauntlet_logs
 allow_parallel: true
 cli:
   default_preference:
-    - claude
     - codex
+    - claude
     - gemini
-  check_usage_limit: false
+  check_usage_limit: true
 entry_points:
   - path: "src"
     checks:
@@ -18,6 +18,6 @@ entry_points:
   - path: "package.json"
     checks:
       - security-deps
-  - path: "docs/plans"
+  - path: "internal-docs/plans"
     reviews:
       - plan-review

@@ -40,6 +40,8 @@ mock.module("../cli-adapters/index.js", () => ({
 	getAllAdapters: () => mockAdapters,
 	getProjectCommandAdapters: () => mockAdapters,
 	getUserCommandAdapters: () => [],
+	getAdapter: (name: string) => mockAdapters.find((a) => a.name === name),
+	getValidCLITools: () => mockAdapters.map((a) => a.name),
 }));
 
 // Import after mocking

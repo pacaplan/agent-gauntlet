@@ -1,4 +1,5 @@
 export { registerCheckCommand } from "./check.js";
+export { registerCICommand } from "./ci/index.js";
 export { registerDetectCommand } from "./detect.js";
 export { registerHealthCommand } from "./health.js";
 export { registerHelpCommand } from "./help.js";
