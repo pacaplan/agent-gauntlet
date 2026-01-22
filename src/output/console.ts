@@ -12,14 +12,58 @@ export class ConsoleReporter {
 		const duration = `${(result.duration / 1000).toFixed(2)}s`;
 		const message = result.message ?? "";
 
-		if (result.status === "pass") {
-			console.log(chalk.green(`[PASS]  ${job.id} (${duration})`));
-		} else if (result.status === "fail") {
-			console.log(chalk.red(`[FAIL]  ${job.id} (${duration}) - ${message}`));
+		if (result.subResults && result.subResults.length > 0) {
+			// Print split results
+			for (const sub of result.subResults) {
+				const statusColor =
+					sub.status === "pass"
+						? chalk.green
+						: sub.status === "fail"
+							? chalk.red
+							: chalk.magenta;
+				const label =
+					sub.status === "pass"
+						? "PASS"
+						: sub.status === "fail"
+							? "FAIL"
+							: "ERROR";
+
+				let logInfo = "";
+				if (sub.status !== "pass" && sub.logPath) {
+					logInfo = `\n      Log: ${sub.logPath}`;
+				}
+
+				console.log(
+					statusColor(
+						`[${label}]  ${job.id} ${chalk.dim(sub.nameSuffix)} (${duration}) - ${sub.message}${logInfo}`,
+					),
+				);
+			}
 		} else {
-			console.log(
-				chalk.magenta(`[ERROR] ${job.id} (${duration}) - ${message}`),
-			);
+			// Standard single result
+			let logInfo = "";
+			if (result.status !== "pass") {
+				// Try to find a relevant log path
+				const logPath =
+					result.logPath || (result.logPaths && result.logPaths[0]);
+				if (logPath) {
+					logInfo = `\n      Log: ${logPath}`;
+				}
+			}
+
+			if (result.status === "pass") {
+				console.log(chalk.green(`[PASS]  ${job.id} (${duration})`));
+			} else if (result.status === "fail") {
+				console.log(
+					chalk.red(`[FAIL]  ${job.id} (${duration}) - ${message}${logInfo}`),
+				);
+			} else {
+				console.log(
+					chalk.magenta(
+						`[ERROR] ${job.id} (${duration}) - ${message}${logInfo}`,
+					),
+				);
+			}
 		}
 	}
 
@@ -35,15 +79,6 @@ export class ConsoleReporter {
 		if (failed.length > 0) console.log(chalk.red(`Failed: ${failed.length}`));
 		if (errored.length > 0)
 			console.log(chalk.magenta(`Errored: ${errored.length}`));
-
-		if (failed.length > 0 || errored.length > 0) {
-			console.log(`\n${chalk.bold("=== Failure Details ===\n")}`);
-
-			for (const result of [...failed, ...errored]) {
-				const details = await this.extractFailureDetails(result);
-				this.printFailureDetails(result, details);
-			}
-		}
 	}
 
 	/** @internal Public for testing */

@@ -299,19 +299,40 @@ export class ReviewGateExecutor {
 				};
 			}
 
-			const failed = outputs.find((result) => result.status === "fail");
-			const error = outputs.find((result) => result.status === "error");
+			const failed = outputs.filter((result) => result.status === "fail");
+			const errored = outputs.filter((result) => result.status === "error");
+			// If not failed or errored, it must be passed
+			// const passed = outputs.filter((result) => result.status === "pass");
 
 			let status: "pass" | "fail" | "error" = "pass";
 			let message = "Passed";
 
-			if (error) {
+			// Determine overall status
+			if (errored.length > 0) {
 				status = "error";
-				message = `Error (${error.adapter}): ${error.message}`;
-			} else if (failed) {
+				message = `Error in ${errored.length} adapter(s)`;
+			} else if (failed.length > 0) {
 				status = "fail";
-				message = `Failed (${failed.adapter}): ${failed.message}`;
+				message = `Failed by ${failed.length} adapter(s)`;
 			}
+
+			// Build detailed subResults
+			const subResults = outputs.map((out) => {
+				// Find specific log path for this adapter
+				// logPaths contains strings like ".../review_src_lint_codex.log"
+				// We expect the log path to contain the adapter name
+				// This is a heuristic, but likely sufficient given our naming convention
+				const specificLog = logPaths.find((p) =>
+					p.includes(`_${out.adapter}.log`),
+				);
+
+				return {
+					nameSuffix: `(${out.adapter})`,
+					status: out.status,
+					message: out.message,
+					logPath: specificLog,
+				};
+			});
 
 			await mainLogger(`Result: ${status} - ${message}\n`);
 
@@ -321,6 +342,7 @@ export class ReviewGateExecutor {
 				duration: Date.now() - startTime,
 				message,
 				logPaths,
+				subResults,
 			};
 		} catch (error: unknown) {
 			const err = error as { message?: string };
@@ -439,7 +461,7 @@ export class ReviewGateExecutor {
 
 			const resultMsg = `Review result (${adapter.name}): ${evaluation.status} - ${evaluation.message}`;
 			await adapterLogger(`${resultMsg}\n`);
-			await mainLogger(`${resultMsg}\n`);
+
 
 			return { adapter: adapter.name, evaluation };
 		} catch (error: unknown) {
@@ -745,11 +767,7 @@ export class ReviewGateExecutor {
 			: "some";
 
 		// Construct a summary message
-		let msg = `Found ${violationCount} violations`;
-		if (Array.isArray(json.violations) && json.violations.length > 0) {
-			const first = json.violations[0];
-			msg += `. Example: ${first.issue} in ${first.file}`;
-		}
+		const msg = `Found ${violationCount} violations`;
 
 		return { status: "fail", message: msg, json, filteredCount };
 	}
