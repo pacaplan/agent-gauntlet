@@ -7,7 +7,7 @@ remove rerun command
 -- delete log files after all issues fixed
 
 Implement transcript support in code reviews
--- reviewer: cha
+-- did it do waht it said? did it complete the original objective?
 
 Implement provided reviews: critical (bugs), full review (wide net), critic
 -- deep research and create 'best of breed' prompts
