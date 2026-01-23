@@ -77,7 +77,7 @@ export class Runner {
 		let result: GateResult;
 
 		if (job.type === "check") {
-			const logPath = this.logger.getLogPath(job.id);
+			const logPath = await this.logger.getLogPath(job.id);
 			const jobLogger = await this.logger.createJobLogger(job.id);
 			const effectiveBaseBranch =
 				this.baseBranchOverride || this.config.project.base_branch;
@@ -194,7 +194,7 @@ export class Runner {
 		message: string,
 	): Promise<GateResult> {
 		if (job.type === "check") {
-			const logPath = this.logger.getLogPath(job.id);
+			const logPath = await this.logger.getLogPath(job.id);
 			const jobLogger = await this.logger.createJobLogger(job.id);
 			await jobLogger(
 				`[${new Date().toISOString()}] Health check failed\n${message}\n`,

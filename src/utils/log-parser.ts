@@ -22,6 +22,18 @@ export interface GateFailures {
 }
 
 /**
+ * Extract the log prefix (job ID) from a numbered log filename.
+ * Strips the dot-separated run number: `check_src_test.2.log` -> `check_src_test`
+ */
+export function extractPrefix(filename: string): string {
+	// Pattern: <prefix>.<number>.log
+	const m = filename.match(/^(.+)\.\d+\.log$/);
+	if (m) return m[1];
+	// Fallback for non-numbered files
+	return filename.replace(/\.log$/, "");
+}
+
+/**
  * Parses a single log file to extract failures per adapter.
  * Only processes review gates (ignores check gates).
  */
@@ -37,8 +49,8 @@ export async function parseLogFile(
 			return null;
 		}
 
-		// Use the sanitized filename as the Job ID key
-		const jobId = filename.replace(/\.log$/, "");
+		// Use the prefix (stripping run number) as the Job ID key
+		const jobId = extractPrefix(filename);
 
 		// We can't reliably parse entryPoint/gateName from sanitized filename
 		// leaving them empty for now as they aren't critical for the map lookup
@@ -204,7 +216,17 @@ export async function parseLogFile(
 }
 
 /**
+ * Extract the run number from a log filename.
+ * Returns 0 if no run number is found.
+ */
+function extractRunNumber(filename: string): number {
+	const m = filename.match(/\.(\d+)\.log$/);
+	return m ? parseInt(m[1], 10) : 0;
+}
+
+/**
  * Finds all previous failures from the log directory.
+ * Groups files by prefix and only parses the highest-numbered log per prefix.
  */
 export async function findPreviousFailures(
 	logDir: string,
@@ -214,15 +236,23 @@ export async function findPreviousFailures(
 		const files = await fs.readdir(logDir);
 		const gateFailures: GateFailures[] = [];
 
+		// Group log files by prefix, keeping only the highest run number per prefix
+		const latestByPrefix = new Map<string, string>();
+
 		for (const file of files) {
 			if (!file.endsWith(".log")) continue;
+			if (gateFilter && !file.includes(gateFilter)) continue;
 
-			// If gate filter provided, check if filename matches
-			// filename is sanitized, so we do a loose check
-			if (gateFilter && !file.includes(gateFilter)) {
-				continue;
+			const prefix = extractPrefix(file);
+			const runNum = extractRunNumber(file);
+			const existing = latestByPrefix.get(prefix);
+
+			if (!existing || runNum > extractRunNumber(existing)) {
+				latestByPrefix.set(prefix, file);
 			}
+		}
 
+		for (const file of latestByPrefix.values()) {
 			const logPath = path.join(logDir, file);
 			const failure = await parseLogFile(logPath);
 
@@ -233,7 +263,6 @@ export async function findPreviousFailures(
 
 		return gateFailures;
 	} catch (error: unknown) {
-		// If directory doesn't exist, return empty
 		if (
 			typeof error === "object" &&
 			error !== null &&
@@ -242,8 +271,6 @@ export async function findPreviousFailures(
 		) {
 			return [];
 		}
-		// Otherwise log and return empty
-		// console.warn(`Error reading log directory ${logDir}:`, error instanceof Error ? error.message : String(error));
 		return [];
 	}
 }

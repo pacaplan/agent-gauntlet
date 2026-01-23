@@ -1,26 +1,68 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 
-export async function exists(path: string): Promise<boolean> {
+const LOCK_FILENAME = ".gauntlet-run.lock";
+
+export async function exists(filePath: string): Promise<boolean> {
 	try {
-		await fs.stat(path);
+		await fs.stat(filePath);
 		return true;
 	} catch {
 		return false;
 	}
 }
 
-export async function rotateLogs(logDir: string): Promise<void> {
+export async function acquireLock(logDir: string): Promise<void> {
+	await fs.mkdir(logDir, { recursive: true });
+	const lockPath = path.resolve(logDir, LOCK_FILENAME);
+	try {
+		await fs.writeFile(lockPath, String(process.pid), { flag: "wx" });
+	} catch (err: unknown) {
+		if (
+			typeof err === "object" &&
+			err !== null &&
+			"code" in err &&
+			(err as { code: string }).code === "EEXIST"
+		) {
+			console.error(
+				`Error: A gauntlet run is already in progress (lock file: ${lockPath}).`,
+			);
+			console.error(
+				"If no run is actually in progress, delete the lock file manually.",
+			);
+			process.exit(1);
+		}
+		throw err;
+	}
+}
+
+export async function releaseLock(logDir: string): Promise<void> {
+	const lockPath = path.resolve(logDir, LOCK_FILENAME);
+	try {
+		await fs.rm(lockPath, { force: true });
+	} catch {
+		// no-op if missing
+	}
+}
+
+export async function hasExistingLogs(logDir: string): Promise<boolean> {
+	try {
+		const entries = await fs.readdir(logDir);
+		return entries.some((f) => f.endsWith(".log") && f !== "previous");
+	} catch {
+		return false;
+	}
+}
+
+export async function cleanLogs(logDir: string): Promise<void> {
 	const previousDir = path.join(logDir, "previous");
 
 	try {
-		// 1. Ensure logDir exists (if not, nothing to rotate, but we should create it for future use if needed,
-		//    though usually the logger creates it. If it doesn't exist, we can just return).
 		if (!(await exists(logDir))) {
 			return;
 		}
 
-		// 2. Clear gauntlet_logs/previous if it exists
+		// 1. Delete all files in previous/
 		if (await exists(previousDir)) {
 			const previousFiles = await fs.readdir(previousDir);
 			await Promise.all(
@@ -32,19 +74,18 @@ export async function rotateLogs(logDir: string): Promise<void> {
 			await fs.mkdir(previousDir, { recursive: true });
 		}
 
-		// 3. Move all existing files in gauntlet_logs/ to gauntlet_logs/previous
+		// 2. Move all .log files from logDir root into previous/
 		const files = await fs.readdir(logDir);
 		await Promise.all(
 			files
-				.filter((file) => file !== "previous")
+				.filter((file) => file.endsWith(".log"))
 				.map((file) =>
 					fs.rename(path.join(logDir, file), path.join(previousDir, file)),
 				),
 		);
 	} catch (error) {
-		// Log warning but don't crash the run as log rotation failure isn't critical
 		console.warn(
-			"Failed to rotate logs in",
+			"Failed to clean logs in",
 			logDir,
 			":",
 			error instanceof Error ? error.message : error,

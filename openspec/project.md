@@ -30,9 +30,7 @@ development loops, multi-agent review, and CI usage with minimal setup.
 - Utilities in `src/utils/*`
 
 ### Testing Strategy
-- `bun test` for unit tests
-- Primary tests live under `src/**/*.test.ts`
-- "Dogfood" this tool for complete verification: `bun run src/index.ts check` and `bun run src/index.ts review`
+- Dogfood: follow the steps in `.gauntlet/run_gauntlet.md` to run the full verification gauntlet and fix any issues
 
 ### Git Workflow
 - Base branch for change detection defaults to `origin/main`

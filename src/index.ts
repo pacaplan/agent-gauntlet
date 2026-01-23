@@ -4,12 +4,12 @@ import packageJson from "../package.json" with { type: "json" };
 import {
 	registerCheckCommand,
 	registerCICommand,
+	registerCleanCommand,
 	registerDetectCommand,
 	registerHealthCommand,
 	registerHelpCommand,
 	registerInitCommand,
 	registerListCommand,
-	registerRerunCommand,
 	registerReviewCommand,
 	registerRunCommand,
 } from "./commands/index.js";
@@ -23,9 +23,9 @@ program
 
 // Register all commands
 registerRunCommand(program);
-registerRerunCommand(program);
 registerCheckCommand(program);
 registerCICommand(program);
+registerCleanCommand(program);
 registerReviewCommand(program);
 registerDetectCommand(program);
 registerListCommand(program);

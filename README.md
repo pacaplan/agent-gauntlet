@@ -51,9 +51,9 @@ The use cases below illustrate when each of these patterns may be used.
 2. Run `/gauntlet` from chat
 3. Gauntlet detects changed files and runs configured checks (linter, tests, type checking, etc.)
 4. Simultaneously, Gauntlet invokes AI CLIs for code review
-5. Assistant reviews results, fixes identified issues, and runs `agent-gauntlet rerun`
-6. Gauntlet verifies fixes and checks for new issues
-7. Process repeats automatically (up to 3 reruns) until all gates pass
+5. Assistant reviews results, fixes identified issues, and runs `agent-gauntlet run` again
+6. Gauntlet detects existing logs, switches to verification mode, and checks fixes
+7. Process repeats automatically (up to 3 iterations) until all gates pass
 
 ### 3. Agentic Implementation
 

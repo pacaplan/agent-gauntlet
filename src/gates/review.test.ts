@@ -156,42 +156,42 @@ describe("ReviewGateExecutor Logging", () => {
 			);
 		}
 
-		if (!result.logPaths[0]?.includes("review_src_code-quality_codex.log")) {
+		if (!result.logPaths[0]?.includes("review_src_code-quality_codex.1.log")) {
 			throw new Error(
-				`Expected result.logPaths[0] to contain "review_src_code-quality_codex.log" but got "${result.logPaths[0]}"`,
+				`Expected result.logPaths[0] to contain "review_src_code-quality_codex.1.log" but got "${result.logPaths[0]}"`,
 			);
 		}
 
-		if (!result.logPaths[1]?.includes("review_src_code-quality_claude.log")) {
+		if (!result.logPaths[1]?.includes("review_src_code-quality_claude.1.log")) {
 			throw new Error(
-				`Expected result.logPaths[1] to contain "review_src_code-quality_claude.log" but got "${result.logPaths[1]}"`,
+				`Expected result.logPaths[1] to contain "review_src_code-quality_claude.1.log" but got "${result.logPaths[1]}"`,
 			);
 		}
 
 		const files = await fs.readdir("logs");
 		const filesList = files.join(", ");
 
-		if (!files.includes("review_src_code-quality_codex.log")) {
+		if (!files.includes("review_src_code-quality_codex.1.log")) {
 			throw new Error(
-				`Expected log directory to contain "review_src_code-quality_codex.log" but only found: [${filesList}]`,
+				`Expected log directory to contain "review_src_code-quality_codex.1.log" but only found: [${filesList}]`,
 			);
 		}
 
-		if (!files.includes("review_src_code-quality_claude.log")) {
+		if (!files.includes("review_src_code-quality_claude.1.log")) {
 			throw new Error(
-				`Expected log directory to contain "review_src_code-quality_claude.log" but only found: [${filesList}]`,
+				`Expected log directory to contain "review_src_code-quality_claude.1.log" but only found: [${filesList}]`,
 			);
 		}
 
-		if (files.includes("review_src_code-quality.log")) {
+		if (files.some((f) => f.match(/^review_src_code-quality\.\d+\.log$/))) {
 			throw new Error(
-				`Expected log directory NOT to contain generic log "review_src_code-quality.log" but it was found. All files: [${filesList}]`,
+				`Expected log directory NOT to contain generic log "review_src_code-quality.N.log" but it was found. All files: [${filesList}]`,
 			);
 		}
 
 		// Verify multiplexed content
 		const codexLog = await fs.readFile(
-			"logs/review_src_code-quality_codex.log",
+			"logs/review_src_code-quality_codex.1.log",
 			"utf-8",
 		);
 		if (!codexLog.includes("Starting review: code-quality")) {
@@ -206,7 +206,7 @@ describe("ReviewGateExecutor Logging", () => {
 		}
 
 		const claudeLog = await fs.readFile(
-			"logs/review_src_code-quality_claude.log",
+			"logs/review_src_code-quality_claude.1.log",
 			"utf-8",
 		);
 		if (!claudeLog.includes("Starting review: code-quality")) {
@@ -223,8 +223,8 @@ describe("ReviewGateExecutor Logging", () => {
 
 	it("should be handled correctly by ConsoleReporter", async () => {
 		const jobId = "review:src:code-quality";
-		const codexPath = "logs/review_src_code-quality_codex.log";
-		const claudePath = "logs/review_src_code-quality_claude.log";
+		const codexPath = "logs/review_src_code-quality_codex.1.log";
+		const claudePath = "logs/review_src_code-quality_claude.1.log";
 
 		await fs.writeFile(
 			codexPath,

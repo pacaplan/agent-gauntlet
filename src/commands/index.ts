@@ -1,10 +1,10 @@
 export { registerCheckCommand } from "./check.js";
 export { registerCICommand } from "./ci/index.js";
+export { registerCleanCommand } from "./clean.js";
 export { registerDetectCommand } from "./detect.js";
 export { registerHealthCommand } from "./health.js";
 export { registerHelpCommand } from "./help.js";
 export { registerInitCommand } from "./init.js";
 export { registerListCommand } from "./list.js";
-export { registerRerunCommand } from "./rerun.js";
 export { registerReviewCommand } from "./review.js";
 export { registerRunCommand } from "./run.js";
