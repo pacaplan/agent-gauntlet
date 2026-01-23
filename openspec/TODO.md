@@ -1,8 +1,7 @@
+
+
 reviewers create json file. includes status.
 prompt instructs agent to update json file status to "fixed" or "skipped" and adds a short explanation of fix or reason for skipping
-
-
-~~remove rerun command~~ DONE — run/check/review auto-detect rerun mode when logs exist
 
 Implement transcript support in code reviews
 -- did it do waht it said? did it complete the original objective?

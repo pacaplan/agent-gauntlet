@@ -41,6 +41,4 @@
 
 ## 8. Validation
 - [x] 8.1 Dogfood: run the full gauntlet via `.gauntlet/run_gauntlet.md` steps and fix all issues
-- [x] 8.2 All tests pass (61 tests across 15 files)
-- [x] 8.3 Lint passes cleanly (biome check)
-- [x] 8.4 Build compiles successfully
+
