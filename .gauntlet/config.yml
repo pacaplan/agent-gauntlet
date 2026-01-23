@@ -18,6 +18,8 @@ entry_points:
   - path: "package.json"
     checks:
       - security-deps
-  - path: "internal-docs/plans"
+  - path: "openspec/changes"
+    checks:
+      - openspec-validate
     reviews:
-      - plan-review
+      - change-review
