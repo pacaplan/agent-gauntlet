@@ -1,6 +1,6 @@
 
 Misc
-- remove name attribute from checks, should use filename
+- 
 
 remove rerun command
 -- if log files exist, assume it is a rerun and verify the issues

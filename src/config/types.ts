@@ -32,6 +32,7 @@ export type ServiceConfig = z.infer<typeof serviceConfigSchema>;
 
 // Extended check config with loaded content
 export interface LoadedCheckGateConfig extends CheckGateConfig {
+	name: string;
 	fixInstructionsContent?: string;
 }
 

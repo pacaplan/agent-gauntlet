@@ -1,4 +1,4 @@
-name: openspec-validate
+
 command: openspec validate --changes
 working_directory: .
 parallel: true

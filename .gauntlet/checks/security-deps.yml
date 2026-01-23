@@ -1,4 +1,4 @@
-name: security-deps
+
 command: bun audit --audit-level=moderate
 working_directory: .
 parallel: true

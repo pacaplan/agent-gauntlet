@@ -1,0 +1,6 @@
+- [x] Update `checkGateSchema` in `src/config/schema.ts` to remove `name`.
+- [x] Update `src/config/loader.ts` to derive check name from filename when loading checks.
+- [x] Refactor `CheckGateConfig` usage to rely on map keys or injected name property if needed (runtime types might still want a name field, populated by loader).
+- [x] Remove `name` field from all `*.yml` files in `.gauntlet/checks/`.
+- [x] Run `bun test` to ensure no regressions.
+- [x] Verify `agent-gauntlet run` works correctly with updated checks.

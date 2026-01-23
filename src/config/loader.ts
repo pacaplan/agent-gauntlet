@@ -44,16 +44,19 @@ export async function loadConfig(
 				const filePath = path.join(checksPath, file);
 				const content = await fs.readFile(filePath, "utf-8");
 				const raw = YAML.parse(content);
-				// Ensure name matches filename if not provided or just use filename as key
+				const name = path.basename(file, path.extname(file));
 				const parsed: CheckGateConfig = checkGateSchema.parse(raw);
 
 				// Load fix instructions if specified
-				const loadedCheck: LoadedCheckGateConfig = { ...parsed };
+				const loadedCheck: LoadedCheckGateConfig = {
+					...parsed,
+					name,
+				};
 				if (parsed.fix_instructions) {
 					// Security: Reject absolute paths to prevent reading arbitrary files
 					if (path.isAbsolute(parsed.fix_instructions)) {
 						throw new Error(
-							`Fix instructions path must be relative to .gauntlet/ directory, got absolute path: ${parsed.fix_instructions} (referenced by check "${parsed.name}")`,
+							`Fix instructions path must be relative to .gauntlet/ directory, got absolute path: ${parsed.fix_instructions} (referenced by check "${name}")`,
 						);
 					}
 
@@ -75,12 +78,12 @@ export async function loadConfig(
 						relativePath === ""
 					) {
 						throw new Error(
-							`Fix instructions path must stay within .gauntlet/ directory and point to a file: ${parsed.fix_instructions} resolves to ${fixInstructionsPath} (referenced by check "${parsed.name}")`,
+							`Fix instructions path must stay within .gauntlet/ directory and point to a file: ${parsed.fix_instructions} resolves to ${fixInstructionsPath} (referenced by check "${name}")`,
 						);
 					}
 					if (!(await fileExists(fixInstructionsPath))) {
 						throw new Error(
-							`Fix instructions file not found: ${fixInstructionsPath} (referenced by check "${parsed.name}")`,
+							`Fix instructions file not found: ${fixInstructionsPath} (referenced by check "${name}")`,
 						);
 					}
 					loadedCheck.fixInstructionsContent = await fs.readFile(
@@ -89,7 +92,7 @@ export async function loadConfig(
 					);
 				}
 
-				checks[parsed.name] = loadedCheck;
+				checks[name] = loadedCheck;
 			}
 		}
 	}
