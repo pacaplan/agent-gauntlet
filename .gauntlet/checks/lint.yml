@@ -1,4 +1,4 @@
-name: lint
+
 command: bunx biome check src
 working_directory: .
 parallel: true

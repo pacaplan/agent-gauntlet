@@ -44,8 +44,7 @@ export class ConsoleReporter {
 			let logInfo = "";
 			if (result.status !== "pass") {
 				// Try to find a relevant log path
-				const logPath =
-					result.logPath || (result.logPaths && result.logPaths[0]);
+				const logPath = result.logPath || result.logPaths?.[0];
 				if (logPath) {
 					logInfo = `\n      Log: ${logPath}`;
 				}
@@ -260,40 +259,5 @@ export class ConsoleReporter {
 		}
 
 		return details;
-	}
-
-	private printFailureDetails(result: GateResult, details: string[]) {
-		const statusColor = result.status === "error" ? chalk.magenta : chalk.red;
-		const statusLabel = result.status === "error" ? "ERROR" : "FAIL";
-
-		console.log(statusColor(`[${statusLabel}] ${result.jobId}`));
-		if (result.message) {
-			console.log(chalk.dim(`  Summary: ${result.message}`));
-		}
-
-		if (details.length > 0) {
-			console.log(chalk.dim("  Details:"));
-			details.forEach((detail) => {
-				console.log(detail);
-			});
-		}
-
-		if (result.logPaths && result.logPaths.length > 0) {
-			result.logPaths.forEach((p) => {
-				console.log(chalk.dim(`  Log: ${p}`));
-			});
-		} else if (result.logPath) {
-			console.log(chalk.dim(`  Log: ${result.logPath}`));
-		}
-
-		if (result.fixInstructions) {
-			console.log(
-				chalk.cyan(
-					`  Fix instructions: available (${result.fixInstructions.split("\n").length} lines)`,
-				),
-			);
-		}
-
-		console.log(""); // Empty line between failures
 	}
 }
