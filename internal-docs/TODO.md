@@ -1,6 +1,6 @@
+reviewers create json file. includes status.
+prompt instructs agent to update json file status to "fixed" or "skipped" and adds a short explanation of fix or reason for skipping
 
-Misc
-- 
 
 remove rerun command
 -- if log files exist, assume it is a rerun and verify the issues

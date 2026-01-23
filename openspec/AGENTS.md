@@ -203,6 +203,7 @@ If multiple capabilities are affected, create multiple delta files under `change
 - [ ] 1.3 Add frontend component
 - [ ] 1.4 Write tests
 ```
+Always include a final validation section in `tasks.md` that references the project's testing and verification strategy from `openspec/project.md` (e.g. test commands, dogfooding steps, or CI checks).
 
 5. **Create design.md when needed:**
 Create `design.md` if any of the following apply; otherwise omit it:
