@@ -462,7 +462,6 @@ export class ReviewGateExecutor {
 			const resultMsg = `Review result (${adapter.name}): ${evaluation.status} - ${evaluation.message}`;
 			await adapterLogger(`${resultMsg}\n`);
 
-
 			return { adapter: adapter.name, evaluation };
 		} catch (error: unknown) {
 			const err = error as { message?: string };
