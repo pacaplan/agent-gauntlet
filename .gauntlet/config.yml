@@ -4,8 +4,8 @@ allow_parallel: true
 cli:
   default_preference:
     - codex
-    - claude
     - gemini
+    - claude
   check_usage_limit: true
 entry_points:
   - path: "src"
@@ -18,6 +18,8 @@ entry_points:
   - path: "package.json"
     checks:
       - security-deps
-  - path: "internal-docs/plans"
+  - path: "openspec/changes"
+    checks:
+      - openspec-validate
     reviews:
-      - plan-review
+      - change-review
