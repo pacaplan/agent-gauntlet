@@ -24,12 +24,6 @@ describe("EntryPointExpander", () => {
 
 		const result = await expander.expand(entryPoints, changes);
 
-		// Result should have root (implicit or explicit fallback in code) + matched
-		// Looking at code: "if (changedFiles.length > 0) ... results.push({ path: '.', ... })"
-		// Wait, the code creates a default root config if one isn't provided in the list?
-		// Code: "const rootConfig = rootEntryPoint ?? { path: '.' }; results.push({ path: '.', config: rootConfig });"
-		// Yes, it always pushes root if changes > 0.
-
 		expect(result.some((r) => r.path === "apps/api")).toBe(true);
 		expect(result.some((r) => r.path === "apps/web")).toBe(false);
 	});
@@ -57,5 +51,74 @@ describe("EntryPointExpander", () => {
 		const result = await expander.expand(entryPoints, changes);
 
 		expect(result).toHaveLength(0);
+	});
+
+	it("should exclude files based on exact pattern", async () => {
+		const entryPoints: EntryPointConfig[] = [
+			{
+				path: "src",
+				exclude: ["src/ignore.ts"],
+			},
+		];
+		const changes = ["src/include.ts", "src/ignore.ts"];
+
+		const result = await expander.expand(entryPoints, changes);
+
+		expect(result.some((r) => r.path === "src")).toBe(true);
+	});
+
+	it("should not match entry point if all changes are excluded", async () => {
+		const entryPoints: EntryPointConfig[] = [
+			{
+				path: "src",
+				exclude: ["src/ignore.ts"],
+			},
+		];
+		const changes = ["src/ignore.ts"];
+
+		const result = await expander.expand(entryPoints, changes);
+
+		// Root is added implicitly.
+		expect(result.some((r) => r.path === ".")).toBe(true);
+		expect(result.some((r) => r.path === "src")).toBe(false);
+	});
+
+	it("should exclude directory prefix", async () => {
+		const entryPoints: EntryPointConfig[] = [
+			{
+				path: "src",
+				exclude: ["src/ignored_dir"],
+			},
+		];
+		const changes = ["src/ignored_dir/file.ts"];
+
+		const result = await expander.expand(entryPoints, changes);
+		expect(result.some((r) => r.path === "src")).toBe(false);
+	});
+
+	it("should exclude glob patterns", async () => {
+		const entryPoints: EntryPointConfig[] = [
+			{
+				path: "src",
+				exclude: ["**/*.md"],
+			},
+		];
+		const changes = ["src/README.md"];
+
+		const result = await expander.expand(entryPoints, changes);
+		expect(result.some((r) => r.path === "src")).toBe(false);
+	});
+
+	it("should handle root exclusions", async () => {
+		const entryPoints: EntryPointConfig[] = [
+			{
+				path: ".",
+				exclude: ["**/*.lock"],
+			},
+		];
+		const changes = ["bun.lock"];
+
+		const result = await expander.expand(entryPoints, changes);
+		expect(result.some((r) => r.path === ".")).toBe(false);
 	});
 });

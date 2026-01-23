@@ -51,6 +51,7 @@ export const reviewPromptFrontmatterSchema = z.object({
 
 export const entryPointSchema = z.object({
 	path: z.string().min(1),
+	exclude: z.array(z.string().min(1)).optional(),
 	checks: z.array(z.string().min(1)).optional(),
 	reviews: z.array(z.string().min(1)).optional(),
 });
