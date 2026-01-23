@@ -203,7 +203,12 @@ If multiple capabilities are affected, create multiple delta files under `change
 - [ ] 1.3 Add frontend component
 - [ ] 1.4 Write tests
 ```
-Always include a final validation section in `tasks.md` that references the project's testing and verification strategy from `openspec/project.md` (e.g. test commands, dogfooding steps, or CI checks).
+Always include a final validation section in `tasks.md` Example: 
+```markdown
+## 8. Validation
+- [] Dogfood: run the full gauntlet via `.gauntlet/run_gauntlet.md` steps and fix all issues
+```
+**Do not** incluclude linting, tests, build, etc in the validation; the gauntlet suite runs all of this.
 
 5. **Create design.md when needed:**
 Create `design.md` if any of the following apply; otherwise omit it:

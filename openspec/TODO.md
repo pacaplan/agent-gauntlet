@@ -1,4 +1,6 @@
+add check for build
 
+comment on the agent-gauntlet.yml
 
 reviewers create json file. includes status.
 prompt instructs agent to update json file status to "fixed" or "skipped" and adds a short explanation of fix or reason for skipping
