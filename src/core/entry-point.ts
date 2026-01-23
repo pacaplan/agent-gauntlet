@@ -105,7 +105,7 @@ export class EntryPointExpander {
 		const prefixes: string[] = [];
 
 		for (const pattern of patterns) {
-			if (pattern.match(/[*?\[{]/)) {
+			if (pattern.match(/[*?[{]/)) {
 				globs.push(new Glob(pattern));
 			} else {
 				prefixes.push(pattern);

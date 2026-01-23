@@ -108,12 +108,13 @@ export async function validateConfig(
 				if (file.endsWith(".yml") || file.endsWith(".yaml")) {
 					const filePath = path.join(checksPath, file);
 					filesChecked.push(filePath);
+					const name = path.basename(file, path.extname(file));
 					try {
 						const content = await fs.readFile(filePath, "utf-8");
 						const raw = YAML.parse(content);
 						const parsed = checkGateSchema.parse(raw);
-						existingCheckNames.add(parsed.name); // Track that this check exists
-						checks[parsed.name] = parsed;
+						existingCheckNames.add(name); // Track that this check exists
+						checks[name] = parsed;
 
 						// Semantic validation
 						if (!parsed.command || parsed.command.trim() === "") {
@@ -125,17 +126,9 @@ export async function validateConfig(
 							});
 						}
 					} catch (error: unknown) {
-						// Try to extract check name from raw YAML even if parsing failed
-						try {
-							const content = await fs.readFile(filePath, "utf-8");
-							const raw = YAML.parse(content);
-							if (raw.name && typeof raw.name === "string") {
-								existingCheckNames.add(raw.name); // Track that this check file exists
-							}
-						} catch {
-							// If we can't even parse the name, that's okay - we'll just skip tracking it
-						}
-
+						// Track that this check file exists even if parsing failed
+						// Use filename-based name since name is no longer in YAML
+						existingCheckNames.add(name);
 						if (error instanceof ZodError) {
 							error.errors.forEach((err) => {
 								issues.push({
