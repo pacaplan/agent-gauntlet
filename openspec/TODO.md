@@ -1,6 +1,6 @@
-add retry limit to config and check it from script (remove from prompt)
 
-allow multiple reviews from same agent. go in round robin style, skipping unavailable ones. not possible to have error for not enough CLs available.
+
+write console output to a main log file as well. 
 
 ------------------------------------------------------------
 

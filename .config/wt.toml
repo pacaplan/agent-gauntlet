@@ -1,0 +1,10 @@
+# Worktrunk Project Configuration
+# Hooks for agent-gauntlet worktrees
+
+# Post-Create: install dependencies after worktree creation
+[post-create]
+deps = "bun install"
+
+# Pre-Merge: run gauntlet checks before merging back
+[pre-merge]
+check = "bun src/index.ts check"
