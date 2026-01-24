@@ -1,12 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, mock } from "bun:test";
 import fs from "node:fs/promises";
 import path from "node:path";
-import { Logger } from "../output/logger";
+import { Logger } from "../../src/output/logger";
 
 // Mock adapter execution
 const mockExecute = mock(async () => "");
 
-mock.module("../cli-adapters/index.js", () => ({
+mock.module("../../src/cli-adapters/index.js", () => ({
 	getAdapter: (name: string) => ({
 		name,
 		isAvailable: async () => true,
@@ -25,7 +25,7 @@ mock.module("../cli-adapters/index.js", () => ({
 }));
 
 // We need to import after mocking
-const { ReviewGateExecutor } = await import("./review.js");
+const { ReviewGateExecutor } = await import("../../src/gates/review.js");
 
 describe("ReviewGateExecutor Rerun Logic", () => {
 	let executor: InstanceType<typeof ReviewGateExecutor>;

@@ -10,7 +10,7 @@ import {
 import fs from "node:fs/promises";
 import path from "node:path";
 import { Command } from "commander";
-import { registerListCommand } from "./list.js";
+import { registerListCommand } from "../../src/commands/list.js";
 
 const TEST_DIR = path.join(process.cwd(), `test-list-${Date.now()}`);
 const GAUNTLET_DIR = path.join(TEST_DIR, ".gauntlet");

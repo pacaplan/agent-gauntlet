@@ -10,7 +10,7 @@ import {
 import fs from "node:fs/promises";
 import path from "node:path";
 import { Command } from "commander";
-import { registerHealthCommand } from "./health.js";
+import { registerHealthCommand } from "../../src/commands/health.js";
 
 const TEST_DIR = path.join(process.cwd(), `test-health-${Date.now()}`);
 const GAUNTLET_DIR = path.join(TEST_DIR, ".gauntlet");

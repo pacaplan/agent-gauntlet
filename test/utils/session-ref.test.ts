@@ -7,7 +7,7 @@ import {
 	resetExecFn,
 	setExecFn,
 	writeSessionRef,
-} from "./session-ref";
+} from "../../src/utils/session-ref";
 
 describe("Session Ref Utils", () => {
 	const logDir = path.join(

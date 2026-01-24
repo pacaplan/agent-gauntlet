@@ -1,9 +1,9 @@
 import { afterEach, describe, expect, it, mock } from "bun:test";
-import type { LoadedConfig } from "../config/types";
-import type { ConsoleReporter } from "../output/console";
-import type { Logger } from "../output/logger";
-import type { Job } from "./job";
-import { Runner } from "./runner";
+import type { LoadedConfig } from "../../src/config/types";
+import type { ConsoleReporter } from "../../src/output/console";
+import type { Logger } from "../../src/output/logger";
+import type { Job } from "../../src/core/job";
+import { Runner } from "../../src/core/runner";
 
 // Mock dependencies
 const mockLogger = {
@@ -35,14 +35,14 @@ const mockExecuteReview = mock(async () => ({
 	jobId: "review-job",
 }));
 
-mock.module("../gates/review.js", () => ({
+mock.module("../../src/gates/review.js", () => ({
 	ReviewGateExecutor: class {
 		execute = mockExecuteReview;
 	},
 }));
 
 // Mock CheckGateExecutor
-mock.module("../gates/check.js", () => ({
+mock.module("../../src/gates/check.js", () => ({
 	CheckGateExecutor: class {
 		execute = mock(async () => ({
 			status: "pass",

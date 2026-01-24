@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import fs from "node:fs/promises";
 import path from "node:path";
-import { Logger } from "./logger.js";
+import { Logger } from "../../src/output/logger.js";
 
 const TEST_DIR = path.join(import.meta.dir, "../../.test-logger");
 

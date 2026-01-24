@@ -6,7 +6,7 @@ import {
 	cleanLogs,
 	hasExistingLogs,
 	releaseLock,
-} from "./shared.js";
+} from "../../src/commands/shared.js";
 
 const TEST_DIR = path.join(import.meta.dir, "../../.test-shared");
 

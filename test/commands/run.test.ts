@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it } from "bun:test";
 import { Command } from "commander";
-import { registerRunCommand } from "./run.js";
+import { registerRunCommand } from "../../src/commands/run.js";
 
 describe("Run Command", () => {
 	let program: Command;

@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from "bun:test";
 import fs from "node:fs/promises";
 import path from "node:path";
-import { loadConfig } from "./loader.js";
+import { loadConfig } from "../../src/config/loader.js";
 
 const TEST_DIR = path.join(process.cwd(), `test-env-${Date.now()}`);
 const GAUNTLET_DIR = path.join(TEST_DIR, ".gauntlet");

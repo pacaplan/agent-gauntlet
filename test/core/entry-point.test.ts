@@ -1,6 +1,6 @@
 import { describe, expect, it } from "bun:test";
-import type { EntryPointConfig } from "../config/types.js";
-import { EntryPointExpander } from "./entry-point.js";
+import type { EntryPointConfig } from "../../src/config/types.js";
+import { EntryPointExpander } from "../../src/core/entry-point.js";
 
 describe("EntryPointExpander", () => {
 	const expander = new EntryPointExpander();

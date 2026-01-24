@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it } from "bun:test";
 import { Command } from "commander";
-import { registerReviewCommand } from "./review.js";
+import { registerReviewCommand } from "../../src/commands/review.js";
 
 describe("Review Command", () => {
 	let program: Command;

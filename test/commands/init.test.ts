@@ -36,7 +36,7 @@ const mockAdapters = [
 	},
 ];
 
-mock.module("../cli-adapters/index.js", () => ({
+mock.module("../../src/cli-adapters/index.js", () => ({
 	getAllAdapters: () => mockAdapters,
 	getProjectCommandAdapters: () => mockAdapters,
 	getUserCommandAdapters: () => [],
@@ -45,7 +45,7 @@ mock.module("../cli-adapters/index.js", () => ({
 }));
 
 // Import after mocking
-const { registerInitCommand } = await import("./init.js");
+const { registerInitCommand } = await import("../../src/commands/init.js");
 
 describe("Init Command", () => {
 	let program: Command;

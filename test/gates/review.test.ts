@@ -1,13 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it, mock } from "bun:test";
 import fs from "node:fs/promises";
 import path from "node:path";
-import type { CLIAdapter } from "../cli-adapters/index.js";
+import type { CLIAdapter } from "../../src/cli-adapters/index.js";
 import type {
 	ReviewGateConfig,
 	ReviewPromptFrontmatter,
-} from "../config/types.js";
-import { Logger } from "../output/logger.js";
-import type { ReviewGateExecutor } from "./review.js";
+} from "../../src/config/types.js";
+import { Logger } from "../../src/output/logger.js";
+import type { ReviewGateExecutor } from "../../src/gates/review.js";
 
 const TEST_DIR = path.join(process.cwd(), `test-review-logs-${Date.now()}`);
 
@@ -78,7 +78,7 @@ describe("ReviewGateExecutor Logging", () => {
 			}) as unknown as CLIAdapter;
 
 		// Mock getAdapter and other exports that may be imported by other modules
-		mock.module("../cli-adapters/index.js", () => ({
+		mock.module("../../src/cli-adapters/index.js", () => ({
 			getAdapter: (name: string) => createMockAdapter(name),
 			getAllAdapters: () => [
 				createMockAdapter("codex"),
@@ -95,7 +95,7 @@ describe("ReviewGateExecutor Logging", () => {
 			getValidCLITools: () => ["codex", "claude", "gemini"],
 		}));
 
-		const { ReviewGateExecutor } = await import("./review.js");
+		const { ReviewGateExecutor } = await import("../../src/gates/review.js");
 		executor = new ReviewGateExecutor();
 	});
 
@@ -258,7 +258,7 @@ Violations:
 			logPaths: [codexPath, claudePath],
 		};
 
-		const { ConsoleReporter } = await import("../output/console.js");
+		const { ConsoleReporter } = await import("../../src/output/console.js");
 		const reporter = new ConsoleReporter();
 
 		// We can access extractFailureDetails directly as it is public

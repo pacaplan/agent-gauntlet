@@ -5,7 +5,7 @@ import {
 	extractPrefix,
 	findPreviousFailures,
 	parseLogFile,
-} from "./log-parser.js";
+} from "../../src/utils/log-parser.js";
 
 const TEST_DIR = path.join(import.meta.dir, "../../.test-log-parser");
 
