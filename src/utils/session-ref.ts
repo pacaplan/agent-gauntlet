@@ -6,8 +6,9 @@ import { promisify } from "node:util";
 const SESSION_REF_FILENAME = ".session_ref";
 
 // Exported for testing - allows injection of mock exec
-export let execFn: (cmd: string) => Promise<{ stdout: string; stderr: string }> =
-	promisify(exec);
+export let execFn: (
+	cmd: string,
+) => Promise<{ stdout: string; stderr: string }> = promisify(exec);
 
 /**
  * Set the exec function (for testing)

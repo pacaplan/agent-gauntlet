@@ -73,14 +73,15 @@ describe("Runner", () => {
 			entryPoint: "src",
 			gateConfig: {
 				name: "review",
-				cli_preference: ["mock"], // Assume mock adapter passes preflight (need to mock adapter check?)
+				cli_preference: ["mock"],
+				// biome-ignore lint/suspicious/noExplicitAny: Partial mock config for testing
 			} as any,
 			workingDirectory: ".",
 			name: "review",
 		};
 
 		// We need to mock checkAdapter to pass preflight
-		// Runner has private checkAdapter. We can mock it by casting runner to any
+		// biome-ignore lint/suspicious/noExplicitAny: Accessing private method for testing
 		(runner as any).checkAdapter = mock(async () => true);
 
 		const success = await runner.run([job]);
