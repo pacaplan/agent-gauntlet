@@ -102,7 +102,7 @@ Iteration 2:
     Reason: Project uses different import ordering convention
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-Total: 5 fixed, 2 skipped across 2 iterations
+Total: 5 fixed, 2 skipped after 2 iterations
 Status: Passed with warnings
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 ```

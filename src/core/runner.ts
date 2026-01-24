@@ -64,7 +64,7 @@ export class Runner {
 
 		await Promise.all([...parallelPromises, sequentialPromise]);
 
-		await this.reporter.printSummary(this.results);
+		await this.reporter.printSummary(this.results, this.config.project.log_dir);
 
 		return this.results.every((r) => r.status === "pass");
 	}

@@ -48,7 +48,9 @@ export async function releaseLock(logDir: string): Promise<void> {
 export async function hasExistingLogs(logDir: string): Promise<boolean> {
 	try {
 		const entries = await fs.readdir(logDir);
-		return entries.some((f) => f.endsWith(".log") && f !== "previous");
+		return entries.some(
+			(f) => (f.endsWith(".log") || f.endsWith(".json")) && f !== "previous",
+		);
 	} catch {
 		return false;
 	}
@@ -74,11 +76,11 @@ export async function cleanLogs(logDir: string): Promise<void> {
 			await fs.mkdir(previousDir, { recursive: true });
 		}
 
-		// 2. Move all .log files from logDir root into previous/
+		// 2. Move all .log and .json files from logDir root into previous/
 		const files = await fs.readdir(logDir);
 		await Promise.all(
 			files
-				.filter((file) => file.endsWith(".log"))
+				.filter((file) => file.endsWith(".log") || file.endsWith(".json"))
 				.map((file) =>
 					fs.rename(path.join(logDir, file), path.join(previousDir, file)),
 				),

@@ -53,12 +53,17 @@ Status: FAIL
 		expect(result?.jobId).toBe("review_src_quality_claude");
 	});
 
-	it("returns null for non-review logs", async () => {
+	it("returns failures for check logs", async () => {
 		const logPath = path.join(TEST_DIR, "check_src.1.log");
-		await fs.writeFile(logPath, "Some check output");
+		await fs.writeFile(
+			logPath,
+			"Some check output\nResult: fail - Error message",
+		);
 
 		const result = await parseLogFile(logPath);
-		expect(result).toBeNull();
+		expect(result).not.toBeNull();
+		expect(result?.jobId).toBe("check_src");
+		expect(result?.adapterFailures[0].adapterName).toBe("check");
 	});
 
 	it("returns null for passing review", async () => {

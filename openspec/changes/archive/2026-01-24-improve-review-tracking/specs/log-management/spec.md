@@ -72,7 +72,13 @@ Upon run completion, the system SHALL display a summary showing fix and skip cou
 #### Scenario: Iteration tracking
 - **WHEN** items are fixed or skipped in different iterations
 - **THEN** the summary SHALL show which iteration each fix or skip occurred in
-- **AND** the summary SHALL include totals (e.g., "Total: 5 fixed, 2 skipped across 2 iterations")
+- **AND** the summary SHALL include totals for fixed, skipped, and currently active failures (e.g., "Total: 5 fixed, 2 skipped, 1 failed after 2 iterations")
+
+#### Scenario: Failure count calculation
+- **WHEN** calculating the "failed" count for the summary
+- **THEN** the system SHALL count each failed or errored check gate as 1 failure
+- **AND** the system SHALL count each unique violation with status "new" (or missing status) in review results as 1 failure
+- **AND** the total SHALL represent active failures in the most recent iteration only
 
 ### Requirement: Console Output Paths
 The console output from gate failures SHALL include the appropriate file path for the agent to read.

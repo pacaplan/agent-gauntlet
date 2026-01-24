@@ -3,9 +3,9 @@ log_dir: gauntlet_logs
 allow_parallel: true
 cli:
   default_preference:
+    - claude
     - codex
     - gemini
-    - claude
   check_usage_limit: true
 entry_points:
   - path: "src"

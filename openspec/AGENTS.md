@@ -206,7 +206,7 @@ If multiple capabilities are affected, create multiple delta files under `change
 Always include a final validation section in `tasks.md` Example: 
 ```markdown
 ## 8. Validation
-- [] Dogfood: run the full gauntlet via `.gauntlet/run_gauntlet.md` steps and fix all issues
+- [] Dogfood: run the full gauntlet via `.claude/commands/dogfood.md` steps and fix all issues
 ```
 **Do not** incluclude linting, tests, build, etc in the validation; the gauntlet suite runs all of this.
 

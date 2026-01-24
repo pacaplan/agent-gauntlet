@@ -1,4 +1,6 @@
 import { exec } from "node:child_process";
+import fs from "node:fs/promises";
+import path from "node:path";
 import { promisify } from "node:util";
 import { getAdapter } from "../cli-adapters/index.js";
 import type {
@@ -10,8 +12,11 @@ import {
 	isValidViolationLocation,
 	parseDiff,
 } from "../utils/diff-parser.js";
-import type { PreviousViolation } from "../utils/log-parser.js";
-import type { GateResult } from "./result.js";
+import type {
+	GateResult,
+	PreviousViolation,
+	ReviewFullJsonOutput,
+} from "./result.js";
 
 const execAsync = promisify(exec);
 
@@ -35,6 +40,7 @@ CRITICAL SCOPE RESTRICTIONS:
 
 IMPORTANT: You must output ONLY a valid JSON object. Do not output any markdown text, explanations, or code blocks outside of the JSON.
 Each violation MUST include a "priority" field with one of: "critical", "high", "medium", "low".
+Each violation MUST include a "status" field set to "new".
 
 If violations are found:
 {
@@ -45,7 +51,8 @@ If violations are found:
       "line": 10,
       "issue": "Description of the violation",
       "fix": "Suggestion on how to fix it",
-      "priority": "high"
+      "priority": "high",
+      "status": "new"
     }
   ]
 }
@@ -69,6 +76,8 @@ interface ReviewJsonOutput {
 		issue: string;
 		fix?: string;
 		priority: "critical" | "high" | "medium" | "low";
+		status: "new" | "fixed" | "skipped";
+		result?: string | null;
 	}>;
 }
 
@@ -253,6 +262,7 @@ export class ReviewGateExecutor {
 							diff,
 							getAdapterLogger,
 							mainLogger,
+							loggerFactory,
 							previousFailures,
 							true,
 							checkUsageLimit,
@@ -276,6 +286,7 @@ export class ReviewGateExecutor {
 						diff,
 						getAdapterLogger,
 						mainLogger,
+						loggerFactory,
 						previousFailures,
 						false,
 						checkUsageLimit,
@@ -301,8 +312,7 @@ export class ReviewGateExecutor {
 
 			const failed = outputs.filter((result) => result.status === "fail");
 			const errored = outputs.filter((result) => result.status === "error");
-			// If not failed or errored, it must be passed
-			// const passed = outputs.filter((result) => result.status === "pass");
+			const allSkipped = outputs.flatMap((result) => result.skipped || []);
 
 			let status: "pass" | "fail" | "error" = "pass";
 			let message = "Passed";
@@ -317,20 +327,42 @@ export class ReviewGateExecutor {
 			}
 
 			// Build detailed subResults
+
 			const subResults = outputs.map((out) => {
 				// Find specific log path for this adapter
-				// logPaths contains strings like ".../review_src_lint_codex.log"
-				// We expect the log path to contain the adapter name
-				// This is a heuristic, but likely sufficient given our naming convention
-				const specificLog = logPaths.find((p) =>
-					p.includes(`_${out.adapter}.log`),
-				);
+
+				// logPaths contains strings like ".../review_src_lint_codex.1.log"
+
+				// We expect the log path to contain the adapter name and end with .log (possibly with run number)
+
+				const specificLog = logPaths.find((p) => {
+					const filename = path.basename(p);
+
+					return (
+						filename.includes(`_${out.adapter}.`) && filename.endsWith(".log")
+					);
+				});
+
+				let logPath = specificLog;
+				if (specificLog && out.json && out.status === "fail") {
+					logPath = specificLog.replace(/\.log$/, ".json");
+				}
+
+				const errorCount =
+					out.json && Array.isArray(out.json.violations)
+						? out.json.violations.filter((v) => !v.status || v.status === "new")
+								.length
+						: out.status === "fail" || out.status === "error"
+							? 1
+							: 0;
 
 				return {
 					nameSuffix: `(${out.adapter})`,
 					status: out.status,
 					message: out.message,
-					logPath: specificLog,
+					logPath,
+					errorCount,
+					skipped: out.skipped,
 				};
 			});
 
@@ -343,6 +375,7 @@ export class ReviewGateExecutor {
 				message,
 				logPaths,
 				subResults,
+				skipped: allSkipped,
 			};
 		} catch (error: unknown) {
 			const err = error as { message?: string };
@@ -366,6 +399,10 @@ export class ReviewGateExecutor {
 			adapterName: string,
 		) => Promise<(output: string) => Promise<void>>,
 		mainLogger: (output: string) => Promise<void>,
+		loggerFactory: (adapterName?: string) => Promise<{
+			logger: (output: string) => Promise<void>;
+			logPath: string;
+		}>,
 		previousFailures?: Map<string, PreviousViolation[]>,
 		skipHealthCheck: boolean = false,
 		checkUsageLimit: boolean = false,
@@ -375,6 +412,12 @@ export class ReviewGateExecutor {
 			status: "pass" | "fail" | "error";
 			message: string;
 			json?: ReviewJsonOutput;
+			skipped?: Array<{
+				file: string;
+				line: number | string;
+				issue: string;
+				result?: string | null;
+			}>;
 		};
 	} | null> {
 		const adapter = getAdapter(toolName);
@@ -400,6 +443,7 @@ export class ReviewGateExecutor {
 			return null;
 		}
 		const adapterLogger = await getAdapterLogger(adapter.name);
+		const { logPath } = await loggerFactory(adapter.name);
 
 		try {
 			const startMsg = `[START] review:.:${config.name} (${adapter.name})`;
@@ -425,20 +469,76 @@ export class ReviewGateExecutor {
 
 			const evaluation = this.evaluateOutput(output, diff);
 
+			if (evaluation.status === "error") {
+				await adapterLogger(`Error: ${evaluation.message}\n`);
+				await mainLogger(
+					`Error parsing review from ${adapter.name}: ${evaluation.message}\n`,
+				);
+			}
+
 			if (evaluation.filteredCount && evaluation.filteredCount > 0) {
 				await adapterLogger(
 					`Note: ${evaluation.filteredCount} out-of-scope violations filtered\n`,
 				);
 			}
 
-			// Log formatted summary
+			let skipped: Array<{
+				file: string;
+				line: number | string;
+				issue: string;
+				result?: string | null;
+			}> = [];
+
+			// Log formatted summary and write JSON
 			if (evaluation.json) {
+				// Validate required fields for JSON output
+				if (evaluation.json.status === "fail") {
+					if (!Array.isArray(evaluation.json.violations)) {
+						await adapterLogger(
+							"Warning: Missing 'violations' array in failure response\n",
+						);
+					} else {
+						for (const v of evaluation.json.violations) {
+							if (
+								!v.file ||
+								v.line === undefined ||
+								v.line === null ||
+								!v.issue ||
+								!v.priority ||
+								!v.status
+							) {
+								await adapterLogger(
+									`Warning: Violation missing required fields: ${JSON.stringify(v)}\n`,
+								);
+							}
+						}
+					}
+				}
+
+				const jsonPath = await this.writeJsonResult(
+					logPath,
+					adapter.name,
+					evaluation.status,
+					output,
+					evaluation.json,
+				);
+
+				skipped = (evaluation.json.violations || [])
+					.filter((v) => v.status === "skipped")
+					.map((v) => ({
+						file: v.file,
+						line: v.line,
+						issue: v.issue,
+						result: v.result,
+					}));
+
 				await adapterLogger(`\n--- Parsed Result (${adapter.name}) ---\n`);
 				if (
 					evaluation.json.status === "fail" &&
 					Array.isArray(evaluation.json.violations)
 				) {
 					await adapterLogger(`Status: FAIL\n`);
+					await adapterLogger(`Review: ${jsonPath}\n`);
 					await adapterLogger(`Violations:\n`);
 					for (const [i, v] of evaluation.json.violations.entries()) {
 						await adapterLogger(
@@ -462,7 +562,15 @@ export class ReviewGateExecutor {
 			const resultMsg = `Review result (${adapter.name}): ${evaluation.status} - ${evaluation.message}`;
 			await adapterLogger(`${resultMsg}\n`);
 
-			return { adapter: adapter.name, evaluation };
+			return {
+				adapter: adapter.name,
+				evaluation: {
+					status: evaluation.status,
+					message: evaluation.message,
+					json: evaluation.json,
+					skipped,
+				},
+			};
 		} catch (error: unknown) {
 			const err = error as { message?: string };
 			const errorMsg = `Error running ${adapter.name}: ${err.message}`;
@@ -603,6 +711,12 @@ export class ReviewGateExecutor {
 	private buildPreviousFailuresSection(
 		violations: PreviousViolation[],
 	): string {
+		// Only re-verify violations marked as 'fixed'
+		const toVerify = violations.filter((v) => v.status === "fixed");
+		const unaddressed = violations.filter(
+			(v) => v.status === "new" || !v.status,
+		);
+
 		// Extract unique files from violations for scoping new issue detection
 		const affectedFiles = [...new Set(violations.map((v) => v.file))];
 
@@ -612,38 +726,52 @@ export class ReviewGateExecutor {
 RERUN MODE: VERIFY PREVIOUS FIXES ONLY
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-This is a RERUN review. The agent attempted to fix the violations listed below.
-Your task is STRICTLY LIMITED to verifying these specific fixes.
+This is a RERUN review. The agent attempted to fix some of the violations listed below.
+Your task is STRICTLY LIMITED to verifying the fixes for violations marked as FIXED.
 
 PREVIOUS VIOLATIONS TO VERIFY:
 `);
 
-		violations.forEach((v, i) => {
-			lines.push(`${i + 1}. ${v.file}:${v.line} - ${v.issue}`);
-			if (v.fix) {
-				lines.push(`   Suggested fix: ${v.fix}`);
-			}
+		if (toVerify.length === 0) {
+			lines.push("(No violations were marked as FIXED for verification)\n");
+		} else {
+			toVerify.forEach((v, i) => {
+				lines.push(`${i + 1}. ${v.file}:${v.line} - ${v.issue}`);
+				if (v.fix) {
+					lines.push(`   Suggested fix: ${v.fix}`);
+				}
+				if (v.result) {
+					lines.push(`   Agent result: ${v.result}`);
+				}
+				lines.push("");
+			});
+		}
+
+		if (unaddressed.length > 0) {
+			lines.push(`UNADDRESSED VIOLATIONS (STILL FAILING):
+The following violations were NOT marked as fixed or skipped and are still active failures:
+`);
+			unaddressed.forEach((v, i) => {
+				lines.push(`${i + 1}. ${v.file}:${v.line} - ${v.issue}`);
+			});
 			lines.push("");
-		});
+		}
 
 		lines.push(`STRICT INSTRUCTIONS FOR RERUN MODE:
 
-1. VERIFY FIXES: Check if each violation listed above has been addressed
+1. VERIFY FIXES: Check if each violation marked as FIXED above has been addressed
    - For violations that are fixed, confirm they no longer appear
-   - For violations that remain unfixed, include them in your violations array
+   - For violations that remain unfixed, include them in your violations array (status: "new")
 
-2. CHECK FOR REGRESSIONS ONLY: You may ONLY report NEW violations if they:
+2. UNADDRESSED VIOLATIONS: You MUST include all UNADDRESSED violations listed above in your output array if they still exist.
+
+3. CHECK FOR REGRESSIONS ONLY: You may ONLY report NEW violations if they:
    - Are in FILES that were modified to fix the above violations: ${affectedFiles.join(", ")}
    - Are DIRECTLY caused by the fix changes (e.g., a fix introduced a new bug)
-   - Are in the same fuion/region that was modified to address a previous violation
+   - Are in the same function/region that was modified to address a previous violation
 
-3. DO NOT REPORT:
-   - Issues in unrelated files or code regions
-   - Pre-existing issues that were not part of the previous violations
-   - Issues in code that was not modified to fix the above violations
-   - General code quality issues outside the scope of the fixes
-
-4. Return status "pass" if ALL previous violations are fixed AND no regressions were introduced
+4. Return status "pass" ONLY if ALL previous violations (including unaddressed ones) are now fixed AND no regressions were introduced.
+   Otherwise, return status "fail" and list all remaining violations.
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`);
 
@@ -779,6 +907,26 @@ PREVIOUS VIOLATIONS TO VERIFY:
 		const msg = `Found ${violationCount} violations`;
 
 		return { status: "fail", message: msg, json, filteredCount };
+	}
+
+	private async writeJsonResult(
+		logPath: string,
+		adapter: string,
+		status: "pass" | "fail" | "error",
+		rawOutput: string,
+		json: ReviewJsonOutput,
+	): Promise<string> {
+		const jsonPath = logPath.replace(/\.log$/, ".json");
+		const fullOutput: ReviewFullJsonOutput = {
+			adapter,
+			timestamp: new Date().toISOString(),
+			status,
+			rawOutput,
+			violations: json.violations || [],
+		};
+
+		await fs.writeFile(jsonPath, JSON.stringify(fullOutput, null, 2));
+		return jsonPath;
 	}
 
 	private parseLines(stdout: string): string[] {

@@ -2,6 +2,7 @@ import fs from "node:fs/promises";
 import chalk from "chalk";
 import type { Job } from "../core/job.js";
 import type { GateResult } from "../gates/result.js";
+import { reconstructHistory } from "../utils/log-parser.js";
 
 export class ConsoleReporter {
 	onJobStart(job: Job) {
@@ -10,10 +11,12 @@ export class ConsoleReporter {
 
 	onJobComplete(job: Job, result: GateResult) {
 		const duration = `${(result.duration / 1000).toFixed(2)}s`;
+
 		const message = result.message ?? "";
 
 		if (result.subResults && result.subResults.length > 0) {
 			// Print split results
+
 			for (const sub of result.subResults) {
 				const statusColor =
 					sub.status === "pass"
@@ -21,6 +24,7 @@ export class ConsoleReporter {
 						: sub.status === "fail"
 							? chalk.red
 							: chalk.magenta;
+
 				const label =
 					sub.status === "pass"
 						? "PASS"
@@ -29,8 +33,15 @@ export class ConsoleReporter {
 							: "ERROR";
 
 				let logInfo = "";
+
 				if (sub.status !== "pass" && sub.logPath) {
-					logInfo = `\n      Log: ${sub.logPath}`;
+					// Prefer JSON if it exists for reviews
+
+					const displayLog = sub.logPath;
+
+					const logPrefix = displayLog.endsWith(".json") ? "Review:" : "Log:";
+
+					logInfo = `\n      ${logPrefix} ${displayLog}`;
 				}
 
 				console.log(
@@ -66,18 +77,94 @@ export class ConsoleReporter {
 		}
 	}
 
-	async printSummary(results: GateResult[]) {
-		console.log(`\n${chalk.bold("--- Gauntlet Summary ---")}`);
+	async printSummary(results: GateResult[], logDir?: string) {
+		console.log(
+			`\n${chalk.bold("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")}`,
+		);
+		console.log(chalk.bold("RESULTS SUMMARY"));
+		console.log(chalk.bold("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"));
 
-		const passed = results.filter((r) => r.status === "pass");
+		if (logDir) {
+			try {
+				const history = await reconstructHistory(logDir);
+				for (const iter of history) {
+					if (iter.fixed.length === 0 && iter.skipped.length === 0) continue;
+
+					console.log(`\nIteration ${iter.iteration}:`);
+					for (const f of iter.fixed) {
+						const label = f.adapter ? `${f.jobId} (${f.adapter})` : f.jobId;
+						console.log(chalk.green(`  ✓ Fixed: ${label} - ${f.details}`));
+					}
+					for (const s of iter.skipped) {
+						const label = s.adapter ? `${s.jobId} (${s.adapter})` : s.jobId;
+						console.log(
+							chalk.yellow(
+								`  ⊘ Skipped: ${label} - ${s.file}:${s.line} ${s.issue}`,
+							),
+						);
+						if (s.result) {
+							console.log(chalk.dim(`    Reason: ${s.result}`));
+						}
+					}
+				}
+
+				const totalFixed = history.reduce(
+					(sum, iter) => sum + iter.fixed.length,
+					0,
+				);
+				const totalSkipped = history.reduce(
+					(sum, iter) => sum + iter.skipped.length,
+					0,
+				);
+
+				let totalFailed = 0;
+				for (const res of results) {
+					if (res.subResults && res.subResults.length > 0) {
+						for (const sub of res.subResults) {
+							if (sub.status === "fail" || sub.status === "error") {
+								totalFailed += sub.errorCount ?? 1;
+							}
+						}
+					} else if (res.status === "fail" || res.status === "error") {
+						totalFailed += res.errorCount ?? 1;
+					}
+				}
+
+				console.log(
+					`\n${chalk.bold("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")}`,
+				);
+				const iterationsText =
+					history.length > 1 ? ` after ${history.length} iterations` : "";
+				console.log(
+					`Total: ${totalFixed} fixed, ${totalSkipped} skipped, ${totalFailed} failed${iterationsText}`,
+				);
+			} catch (err) {
+				console.warn(
+					chalk.yellow(`Warning: Failed to reconstruct history: ${err}`),
+				);
+			}
+		}
+
 		const failed = results.filter((r) => r.status === "fail");
 		const errored = results.filter((r) => r.status === "error");
+		const anySkipped = results.some((r) => r.skipped && r.skipped.length > 0);
 
-		console.log(`Total: ${results.length}`);
-		console.log(chalk.green(`Passed: ${passed.length}`));
-		if (failed.length > 0) console.log(chalk.red(`Failed: ${failed.length}`));
-		if (errored.length > 0)
-			console.log(chalk.magenta(`Errored: ${errored.length}`));
+		let overallStatus = "Passed";
+		let statusColor = chalk.green;
+
+		if (errored.length > 0) {
+			overallStatus = "Error";
+			statusColor = chalk.magenta;
+		} else if (failed.length > 0) {
+			overallStatus = "Failed";
+			statusColor = chalk.red;
+		} else if (anySkipped) {
+			overallStatus = "Passed with warnings";
+			statusColor = chalk.yellow;
+		}
+
+		console.log(statusColor(`Status: ${overallStatus}`));
+		console.log(chalk.bold("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"));
 	}
 
 	/** @internal Public for testing */

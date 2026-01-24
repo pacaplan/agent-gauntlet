@@ -30,7 +30,7 @@ development loops, multi-agent review, and CI usage with minimal setup.
 - Utilities in `src/utils/*`
 
 ### Testing Strategy
-- Dogfood: follow the steps in `.gauntlet/run_gauntlet.md` to run the full verification gauntlet and fix any issues
+- Dogfood: follow the steps in `.claude/commands/dogfood.md` to run the full verification gauntlet and fix any issues
 
 ### Git Workflow
 - Base branch for change detection defaults to `origin/main`
