@@ -38,7 +38,7 @@ export class GeminiAdapter implements CLIAdapter {
 			try {
 				const { stdout, stderr } = await execAsync(
 					'echo "hello" | gemini --sandbox --output-format text',
-					{ timeout: 10000 },
+					{ timeout: 30000 },
 				);
 
 				const combined = (stdout || "") + (stderr || "");
@@ -56,7 +56,19 @@ export class GeminiAdapter implements CLIAdapter {
 					stderr?: string;
 					stdout?: string;
 					message?: string;
+					code?: number | string;
+					signal?: string;
 				};
+
+				// Check for timeout
+				if (execError.signal === "SIGTERM" && execError.code === null) {
+					return {
+						available: true,
+						status: "unhealthy",
+						message: "Error: Health check timed out",
+					};
+				}
+
 				const stderr = execError.stderr || "";
 				const stdout = execError.stdout || "";
 				const combined = stderr + stdout;
@@ -159,7 +171,10 @@ ${escapedBody}
 
 		// Write to a temporary file to avoid shell escaping issues
 		const tmpDir = os.tmpdir();
-		const tmpFile = path.join(tmpDir, `gauntlet-gemini-${Date.now()}.txt`);
+		const tmpFile = path.join(
+			tmpDir,
+			`gauntlet-gemini-${process.pid}-${Date.now()}.txt`,
+		);
 		await fs.writeFile(tmpFile, fullContent);
 
 		try {

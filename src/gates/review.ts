@@ -111,8 +111,13 @@ export class ReviewGateExecutor {
 		}>,
 		baseBranch: string,
 		previousFailures?: Map<string, PreviousViolation[]>,
-		changeOptions?: { commit?: string; uncommitted?: boolean },
+		changeOptions?: {
+			commit?: string;
+			uncommitted?: boolean;
+			fixBase?: string;
+		},
 		checkUsageLimit: boolean = false,
+		rerunThreshold: "critical" | "high" | "medium" | "low" = "high",
 	): Promise<GateResult> {
 		const startTime = Date.now();
 		const logBuffer: string[] = [];
@@ -206,6 +211,7 @@ export class ReviewGateExecutor {
 				// Parallel Execution Logic
 				// Check health of adapters in parallel, but only as many as needed
 				const healthyAdapters: string[] = [];
+				const healthFailures: string[] = [];
 				let prefIndex = 0;
 
 				while (
@@ -229,15 +235,17 @@ export class ReviewGateExecutor {
 						if (res.status === "healthy") {
 							healthyAdapters.push(res.toolName);
 						} else if (res.status === "unhealthy") {
-							await mainLogger(
-								`Skipping ${res.toolName}: ${res.message || "Unhealthy"}\n`,
-							);
+							const reason = res.message || "Unhealthy";
+							healthFailures.push(`${res.toolName}: ${reason}`);
+							await mainLogger(`Skipping ${res.toolName}: ${reason}\n`);
 						}
 					}
 				}
 
 				if (healthyAdapters.length < required) {
-					const msg = `Not enough healthy adapters. Need ${required}, found ${healthyAdapters.length}.`;
+					const failures =
+						healthFailures.length > 0 ? ` (${healthFailures.join(", ")})` : "";
+					const msg = `Not enough healthy adapters. Need ${required}, found ${healthyAdapters.length}.${failures}`;
 					await mainLogger(`Result: error - ${msg}\n`);
 					return {
 						jobId,
@@ -266,6 +274,7 @@ export class ReviewGateExecutor {
 							previousFailures,
 							true,
 							checkUsageLimit,
+							rerunThreshold,
 						),
 					),
 				);
@@ -290,6 +299,7 @@ export class ReviewGateExecutor {
 						previousFailures,
 						false,
 						checkUsageLimit,
+						rerunThreshold,
 					);
 					if (res) {
 						outputs.push({ adapter: res.adapter, ...res.evaluation });
@@ -406,6 +416,7 @@ export class ReviewGateExecutor {
 		previousFailures?: Map<string, PreviousViolation[]>,
 		skipHealthCheck: boolean = false,
 		checkUsageLimit: boolean = false,
+		rerunThreshold: "critical" | "high" | "medium" | "low" = "high",
 	): Promise<{
 		adapter: string;
 		evaluation: {
@@ -468,6 +479,47 @@ export class ReviewGateExecutor {
 			);
 
 			const evaluation = this.evaluateOutput(output, diff);
+
+			// Rerun Filtering: If we have previous failures, filter new violations by threshold
+			if (
+				adapterPreviousViolations.length > 0 &&
+				evaluation.json?.violations &&
+				evaluation.status === "fail"
+			) {
+				const priorities = ["critical", "high", "medium", "low"];
+				const thresholdIndex = priorities.indexOf(rerunThreshold);
+
+				const originalCount = evaluation.json.violations.length;
+
+				evaluation.json.violations = evaluation.json.violations.filter((v) => {
+					const priority = v.priority || "low";
+					const priorityIndex = priorities.indexOf(priority);
+
+					// If priority is invalid/unknown, keep it to be safe
+					if (priorityIndex === -1) return true;
+
+					// Keep if priority is equal or higher (smaller index) than threshold
+					return priorityIndex <= thresholdIndex;
+				});
+
+				const filteredByThreshold =
+					originalCount - evaluation.json.violations.length;
+
+				if (filteredByThreshold > 0) {
+					await adapterLogger(
+						`Note: ${filteredByThreshold} new violations filtered due to rerun threshold (${rerunThreshold})\n`,
+					);
+					evaluation.filteredCount =
+						(evaluation.filteredCount || 0) + filteredByThreshold;
+
+					// If all violations were filtered, update status to pass
+					if (evaluation.json.violations.length === 0) {
+						evaluation.status = "pass";
+						evaluation.message = `Passed (${filteredByThreshold} below-threshold violations filtered)`;
+						evaluation.json.status = "pass";
+					}
+				}
+			}
 
 			if (evaluation.status === "error") {
 				await adapterLogger(`Error: ${evaluation.message}\n`);
@@ -583,8 +635,70 @@ export class ReviewGateExecutor {
 	private async getDiff(
 		entryPointPath: string,
 		baseBranch: string,
-		options?: { commit?: string; uncommitted?: boolean },
+		options?: { commit?: string; uncommitted?: boolean; fixBase?: string },
 	): Promise<string> {
+		// If fixBase is provided (rerun mode)
+		if (options?.fixBase) {
+			// Validate fixBase to prevent command injection
+			if (!/^[a-f0-9]+$/.test(options.fixBase)) {
+				throw new Error(`Invalid session ref: ${options.fixBase}`);
+			}
+
+			const pathArg = this.pathArg(entryPointPath);
+			try {
+				// 1. Diff against the snapshot (handles tracked files and untracked files that were in snapshot)
+				const diff = await this.execDiff(
+					`git diff ${options.fixBase}${pathArg}`,
+				);
+
+				// 2. Identify new untracked files that weren't in the snapshot
+				const { stdout: untrackedStdout } = await execAsync(
+					`git ls-files --others --exclude-standard${pathArg}`,
+					{ maxBuffer: MAX_BUFFER_BYTES },
+				);
+				const currentUntracked = new Set(this.parseLines(untrackedStdout));
+
+				const { stdout: snapshotFilesStdout } = await execAsync(
+					`git ls-tree -r --name-only ${options.fixBase}${pathArg}`,
+					{ maxBuffer: MAX_BUFFER_BYTES },
+				);
+				const snapshotFiles = new Set(this.parseLines(snapshotFilesStdout));
+
+				const newUntracked = [...currentUntracked].filter(
+					(f) => !snapshotFiles.has(f),
+				);
+				const newUntrackedDiffs: string[] = [];
+
+				for (const file of newUntracked) {
+					try {
+						const d = await this.execDiff(
+							`git diff --no-index -- /dev/null ${this.quoteArg(file)}`,
+						);
+						if (d.trim()) newUntrackedDiffs.push(d);
+					} catch (error: unknown) {
+						const err = error as { message?: string; stderr?: string };
+						const msg = [err.message, err.stderr].filter(Boolean).join("\n");
+						if (
+							!msg.includes("Could not access") &&
+							!msg.includes("ENOENT") &&
+							!msg.includes("No such file")
+						) {
+							throw error;
+						}
+					}
+				}
+
+				return [diff, ...newUntrackedDiffs].filter(Boolean).join("\n");
+			} catch (error) {
+				console.warn(
+					"Warning: Failed to compute diff against fixBase %s, falling back to full uncommitted diff.",
+					options.fixBase,
+					error instanceof Error ? error.message : error,
+				);
+				// Fall through to standard uncommitted logic
+			}
+		}
+
 		// If uncommitted mode is explicitly requested
 		if (options?.uncommitted) {
 			const pathArg = this.pathArg(entryPointPath);

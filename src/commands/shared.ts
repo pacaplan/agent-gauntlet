@@ -1,5 +1,6 @@
 import fs from "node:fs/promises";
 import path from "node:path";
+import { clearSessionRef } from "../utils/session-ref";
 
 const LOCK_FILENAME = ".gauntlet-run.lock";
 
@@ -85,6 +86,8 @@ export async function cleanLogs(logDir: string): Promise<void> {
 					fs.rename(path.join(logDir, file), path.join(previousDir, file)),
 				),
 		);
+
+		await clearSessionRef(logDir);
 	} catch (error) {
 		console.warn(
 			"Failed to clean logs in",

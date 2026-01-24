@@ -11,6 +11,7 @@ import {
 	findPreviousFailures,
 	type PreviousViolation,
 } from "../utils/log-parser.js";
+import { readSessionRef, writeSessionRef } from "../utils/session-ref.js";
 import {
 	acquireLock,
 	cleanLogs,
@@ -57,7 +58,7 @@ export function registerRunCommand(program: Command): void {
 					| Map<string, Map<string, PreviousViolation[]>>
 					| undefined;
 				let changeOptions:
-					| { commit?: string; uncommitted?: boolean }
+					| { commit?: string; uncommitted?: boolean; fixBase?: string }
 					| undefined;
 
 				if (isRerun) {
@@ -98,6 +99,10 @@ export function registerRunCommand(program: Command): void {
 					}
 
 					changeOptions = { uncommitted: true };
+					const fixBase = await readSessionRef(config.project.log_dir);
+					if (fixBase) {
+						changeOptions.fixBase = fixBase;
+					}
 				} else if (options.commit || options.uncommitted) {
 					changeOptions = {
 						commit: options.commit,
@@ -159,6 +164,8 @@ export function registerRunCommand(program: Command): void {
 
 				if (success) {
 					await cleanLogs(config.project.log_dir);
+				} else {
+					await writeSessionRef(config.project.log_dir);
 				}
 
 				await releaseLock(config.project.log_dir);

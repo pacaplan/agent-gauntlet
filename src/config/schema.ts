@@ -60,6 +60,9 @@ export const gauntletConfigSchema = z.object({
 	base_branch: z.string().min(1).default("origin/main"),
 	log_dir: z.string().min(1).default("gauntlet_logs"),
 	allow_parallel: z.boolean().default(true),
+	rerun_new_issue_threshold: z
+		.enum(["critical", "high", "medium", "low"])
+		.default("high"),
 	cli: cliConfigSchema,
 	entry_points: z.array(entryPointSchema).min(1),
 });

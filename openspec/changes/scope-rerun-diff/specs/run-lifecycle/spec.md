@@ -36,13 +36,14 @@ On first run, when review gates produce violations, the system SHALL capture a s
 - **THEN** the `.session_ref` file SHALL be removed along with the log files
 
 ### Requirement: Re-run Violation Priority Filter
-When operating in rerun (verification) mode, the system SHALL discard new violations below the configured priority threshold to prevent infinite review loops. The threshold is controlled by the project-level `rerun_new_issue_threshold` setting (default: `"high"`). Only previously-reported violations (for fix verification) and new issues at or above the threshold SHALL be accepted.
+When operating in rerun mode (i.e., previous failures are loaded from log files), the system SHALL discard violations below the configured priority threshold to prevent infinite review loops. The threshold is controlled by the project-level `rerun_new_issue_threshold` setting (default: `"high"`). Only violations at or above the threshold SHALL be accepted.
+
+> **Note:** The narrowed diff (session ref) structurally limits the reviewer's visibility to changes since the snapshot. The priority filter provides additional noise reduction for cases where the diff includes non-fix edits or the reviewer reports low-priority style observations about fix code.
 
 #### Scenario: Below-threshold new violation discarded on re-run
 - **GIVEN** the system is in rerun mode with previous violations loaded
 - **AND** `rerun_new_issue_threshold` is set to `"high"` (or defaulted)
 - **AND** the reviewer reports a new violation with priority "medium" or "low"
-- **AND** the violation does not match any previously-reported violation
 - **WHEN** the system evaluates the review output
 - **THEN** the new violation SHALL be discarded (not counted as a failure)
 - **AND** the system SHALL log the count of filtered below-threshold violations
@@ -69,20 +70,11 @@ When operating in rerun (verification) mode, the system SHALL discard new violat
 - **WHEN** the system evaluates the review output
 - **THEN** the violation SHALL be accepted (all priorities meet threshold)
 
-#### Scenario: Previously-reported violations bypass priority filter
-- **GIVEN** the system is in rerun mode with previous violations loaded
-- **AND** the reviewer reports a violation matching a previously-reported violation (same file and line range)
-- **AND** the violation passes the diff-range filter (`isValidViolationLocation`)
-- **WHEN** the system evaluates the review output
-- **THEN** the violation SHALL bypass the priority threshold filter (accepted regardless of priority)
-- **AND** the violation indicates the previous fix was insufficient
-
 #### Scenario: Filter ordering
 - **GIVEN** the system is in rerun mode
 - **WHEN** the reviewer returns violations
-- **THEN** the diff-range filter (`isValidViolationLocation`) SHALL be applied first
-- **AND** the priority threshold filter SHALL be applied second (only to violations that survive the diff-range filter)
-- **AND** previously-reported violations that survive the diff-range filter SHALL bypass the priority filter
+- **THEN** the diff-range filter (`isValidViolationLocation`) SHALL be applied first (removing violations outside the narrowed diff)
+- **AND** the priority threshold filter SHALL be applied second (removing below-threshold violations from those that survive the diff-range filter)
 
 #### Scenario: Default threshold when not configured
 - **GIVEN** the project config does not specify `rerun_new_issue_threshold`

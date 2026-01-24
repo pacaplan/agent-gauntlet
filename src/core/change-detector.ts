@@ -6,6 +6,7 @@ const execAsync = promisify(exec);
 export interface ChangeDetectorOptions {
 	commit?: string; // If provided, get diff for this commit vs its parent
 	uncommitted?: boolean; // If true, only get uncommitted changes (staged + unstaged)
+	fixBase?: string; // If provided, get diff from this ref to current working tree
 }
 
 export class ChangeDetector {
