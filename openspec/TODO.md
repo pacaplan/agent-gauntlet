@@ -1,6 +1,6 @@
-add check for build
+update the prompt to clean the logs first
 
-comment on the agent-gauntlet.yml
+add explanatory comments for users in the agent-gauntlet.yml above each entrypoint
 
 reviewers create json file. includes status.
 prompt instructs agent to update json file status to "fixed" or "skipped" and adds a short explanation of fix or reason for skipping

@@ -603,14 +603,20 @@ export class ReviewGateExecutor {
 	private buildPreviousFailuresSection(
 		violations: PreviousViolation[],
 	): string {
-		const lines = [
-			"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━",
-			"PREVIOUS FAILURES TO VERIFY (from last run)",
-			"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━",
-			"",
-			"The following violations were identified in the previous review. Your PRIMARY TASK is to verify whether these specific issues have been fixed in the current changes:",
-			"",
-		];
+		// Extract unique files from violations for scoping new issue detection
+		const affectedFiles = [...new Set(violations.map((v) => v.file))];
+
+		const lines: string[] = [];
+
+		lines.push(`━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+RERUN MODE: VERIFY PREVIOUS FIXES ONLY
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+This is a RERUN review. The agent attempted to fix the violations listed below.
+Your task is STRICTLY LIMITED to verifying these specific fixes.
+
+PREVIOUS VIOLATIONS TO VERIFY:
+`);
 
 		violations.forEach((v, i) => {
 			lines.push(`${i + 1}. ${v.file}:${v.line} - ${v.issue}`);
@@ -620,22 +626,26 @@ export class ReviewGateExecutor {
 			lines.push("");
 		});
 
-		lines.push("INSTRUCTIONS:");
-		lines.push(
-			"- Check if each violation listed above has been addressed in the diff",
-		);
-		lines.push(
-			"- For violations that are fixed, confirm they no longer appear",
-		);
-		lines.push(
-			"- For violations that remain unfixed, include them in your violations array",
-		);
-		lines.push("- Also check for any NEW violations in the changed code");
-		lines.push(
-			'- Return status "pass" only if ALL previous violations are fixed AND no new violations exist',
-		);
-		lines.push("");
-		lines.push("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+		lines.push(`STRICT INSTRUCTIONS FOR RERUN MODE:
+
+1. VERIFY FIXES: Check if each violation listed above has been addressed
+   - For violations that are fixed, confirm they no longer appear
+   - For violations that remain unfixed, include them in your violations array
+
+2. CHECK FOR REGRESSIONS ONLY: You may ONLY report NEW violations if they:
+   - Are in FILES that were modified to fix the above violations: ${affectedFiles.join(", ")}
+   - Are DIRECTLY caused by the fix changes (e.g., a fix introduced a new bug)
+   - Are in the same fuion/region that was modified to address a previous violation
+
+3. DO NOT REPORT:
+   - Issues in unrelated files or code regions
+   - Pre-existing issues that were not part of the previous violations
+   - Issues in code that was not modified to fix the above violations
+   - General code quality issues outside the scope of the fixes
+
+4. Return status "pass" if ALL previous violations are fixed AND no regressions were introduced
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`);
 
 		return lines.join("\n");
 	}
