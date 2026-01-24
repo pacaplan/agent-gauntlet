@@ -40,7 +40,7 @@ export class ClaudeAdapter implements CLIAdapter {
 				// We use a simple "hello" prompt to avoid "No messages returned" errors from empty input
 				const { stdout, stderr } = await execAsync(
 					'echo "hello" | claude -p --max-turns 1',
-					{ timeout: 10000 },
+					{ timeout: 30000 },
 				);
 
 				const combined = (stdout || "") + (stderr || "");
@@ -58,7 +58,19 @@ export class ClaudeAdapter implements CLIAdapter {
 					stderr?: string;
 					stdout?: string;
 					message?: string;
+					code?: number | string;
+					signal?: string;
 				};
+
+				// Check for timeout
+				if (execError.signal === "SIGTERM" && execError.code === null) {
+					return {
+						available: true,
+						status: "unhealthy",
+						message: "Error: Health check timed out",
+					};
+				}
+
 				const stderr = execError.stderr || "";
 				const stdout = execError.stdout || "";
 				const combined = stderr + stdout;

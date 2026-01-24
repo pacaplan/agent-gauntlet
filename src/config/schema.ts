@@ -51,6 +51,7 @@ export const reviewPromptFrontmatterSchema = z.object({
 
 export const entryPointSchema = z.object({
 	path: z.string().min(1),
+	exclude: z.array(z.string().min(1)).optional(),
 	checks: z.array(z.string().min(1)).optional(),
 	reviews: z.array(z.string().min(1)).optional(),
 });
@@ -59,6 +60,9 @@ export const gauntletConfigSchema = z.object({
 	base_branch: z.string().min(1).default("origin/main"),
 	log_dir: z.string().min(1).default("gauntlet_logs"),
 	allow_parallel: z.boolean().default(true),
+	rerun_new_issue_threshold: z
+		.enum(["critical", "high", "medium", "low"])
+		.default("high"),
 	cli: cliConfigSchema,
 	entry_points: z.array(entryPointSchema).min(1),
 });

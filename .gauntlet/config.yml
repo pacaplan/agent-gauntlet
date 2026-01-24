@@ -10,15 +10,21 @@ cli:
 entry_points:
   - path: "src"
     checks:
-      - test
+      - build
       - lint
+      - test
       - security-code
     reviews:
       - code-quality
   - path: "package.json"
     checks:
+      - build
+      - test
       - security-deps
   - path: "openspec/changes"
+    exclude:
+      - "openspec/changes/archive"
+      - "**/tasks.md" # Prevent triggering review of entire spec when marking tasks as done 
     checks:
       - openspec-validate
     reviews:

@@ -107,23 +107,21 @@ Runs only applicable reviews for detected changes. Checks are skipped.
 
 Uses the same options as `run` (see above). When using `--gate <name>`, filters to a single review gate name.
 
-### `agent-gauntlet rerun`
+### `agent-gauntlet clean`
 
-Reruns gates with previous failures as context, defaulting to uncommitted changes only.
+Archives logs by moving current `.log` files into `previous/` (after clearing old `previous/` contents).
 
-- Parses previous failures from log files in `gauntlet_logs/`
-- Injects previous violations as context for review gates, helping reviewers verify fixes
-- Defaults to reviewing only uncommitted changes (unlike `run` which compares against `base_branch`)
+This is also triggered automatically when a run completes with all gates passing.
 
-This command is designed for iterative fix-verify loops: after `run` identifies issues and you make fixes, use `rerun` to verify those fixes without re-reviewing the entire changeset.
+### Automatic verification mode
 
-#### `--gate <name>`
+When `run`, `check`, or `review` detect existing `.log` files in the log directory, they automatically switch to verification mode:
 
-Filters to a single gate name. Only previous failures for that gate are loaded as context.
+- Uses uncommitted changes as the diff source (instead of comparing against `base_branch`)
+- Parses the highest-numbered log per prefix for previous failures
+- Injects those failures as context for review gates
 
-#### `--commit <sha>`
-
-Uses diff for a specific commit instead of uncommitted changes.
+This replaces the old `rerun` command — simply run `agent-gauntlet run` again after making fixes.
 
 ### `agent-gauntlet detect`
 

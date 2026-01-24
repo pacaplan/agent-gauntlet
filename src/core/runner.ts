@@ -64,7 +64,7 @@ export class Runner {
 
 		await Promise.all([...parallelPromises, sequentialPromise]);
 
-		await this.reporter.printSummary(this.results);
+		await this.reporter.printSummary(this.results, this.config.project.log_dir);
 
 		return this.results.every((r) => r.status === "pass");
 	}
@@ -76,36 +76,47 @@ export class Runner {
 
 		let result: GateResult;
 
-		if (job.type === "check") {
-			const logPath = this.logger.getLogPath(job.id);
-			const jobLogger = await this.logger.createJobLogger(job.id);
-			const effectiveBaseBranch =
-				this.baseBranchOverride || this.config.project.base_branch;
-			result = await this.checkExecutor.execute(
-				job.id,
-				job.gateConfig as LoadedCheckGateConfig,
-				job.workingDirectory,
-				jobLogger,
-				effectiveBaseBranch,
-			);
-			result.logPath = logPath;
-		} else {
-			// Use sanitized Job ID for lookup because that's what log-parser uses (based on filenames)
-			const safeJobId = sanitizeJobId(job.id);
-			const previousFailures = this.previousFailuresMap?.get(safeJobId);
-			const loggerFactory = this.logger.createLoggerFactory(job.id);
-			const effectiveBaseBranch =
-				this.baseBranchOverride || this.config.project.base_branch;
-			result = await this.reviewExecutor.execute(
-				job.id,
-				job.gateConfig as ReviewGateConfig & ReviewPromptFrontmatter,
-				job.entryPoint,
-				loggerFactory,
-				effectiveBaseBranch,
-				previousFailures,
-				this.changeOptions,
-				this.config.project.cli.check_usage_limit,
-			);
+		try {
+			if (job.type === "check") {
+				const logPath = await this.logger.getLogPath(job.id);
+				const jobLogger = await this.logger.createJobLogger(job.id);
+				const effectiveBaseBranch =
+					this.baseBranchOverride || this.config.project.base_branch;
+				result = await this.checkExecutor.execute(
+					job.id,
+					job.gateConfig as LoadedCheckGateConfig,
+					job.workingDirectory,
+					jobLogger,
+					effectiveBaseBranch,
+				);
+				result.logPath = logPath;
+			} else {
+				// Use sanitized Job ID for lookup because that's what log-parser uses (based on filenames)
+				const safeJobId = sanitizeJobId(job.id);
+				const previousFailures = this.previousFailuresMap?.get(safeJobId);
+				const loggerFactory = this.logger.createLoggerFactory(job.id);
+				const effectiveBaseBranch =
+					this.baseBranchOverride || this.config.project.base_branch;
+				result = await this.reviewExecutor.execute(
+					job.id,
+					job.gateConfig as ReviewGateConfig & ReviewPromptFrontmatter,
+					job.entryPoint,
+					loggerFactory,
+					effectiveBaseBranch,
+					previousFailures,
+					this.changeOptions,
+					this.config.project.cli.check_usage_limit,
+					this.config.project.rerun_new_issue_threshold,
+				);
+			}
+		} catch (err) {
+			console.error("[ERROR] Execution failed for", job.id, ":", err);
+			result = {
+				jobId: job.id,
+				status: "error",
+				duration: 0,
+				message: err instanceof Error ? err.message : String(err),
+			};
 		}
 
 		this.results.push(result);
@@ -136,9 +147,9 @@ export class Runner {
 					(job.gateConfig as LoadedCheckGateConfig).command,
 				);
 				if (!commandName) {
-					preflightResults.push(
-						await this.recordPreflightFailure(job, "Unable to parse command"),
-					);
+					const msg = "Unable to parse command";
+					console.error(`[PREFLIGHT] ${job.id}: ${msg}`);
+					preflightResults.push(await this.recordPreflightFailure(job, msg));
 					if (this.shouldFailFast(job)) this.shouldStop = true;
 					continue;
 				}
@@ -148,12 +159,9 @@ export class Runner {
 					job.workingDirectory,
 				);
 				if (!available) {
-					preflightResults.push(
-						await this.recordPreflightFailure(
-							job,
-							`Missing command: ${commandName}`,
-						),
-					);
+					const msg = `Missing command: ${commandName}`;
+					console.error(`[PREFLIGHT] ${job.id}: ${msg}`);
+					preflightResults.push(await this.recordPreflightFailure(job, msg));
 					if (this.shouldFailFast(job)) this.shouldStop = true;
 					continue;
 				}
@@ -172,12 +180,9 @@ export class Runner {
 				}
 
 				if (availableTools.length < required) {
-					preflightResults.push(
-						await this.recordPreflightFailure(
-							job,
-							`Missing CLI tools: need ${required}, found ${availableTools.length}`,
-						),
-					);
+					const msg = `Missing CLI tools: need ${required}, found ${availableTools.length} (${availableTools.join(", ") || "none"})`;
+					console.error(`[PREFLIGHT] ${job.id}: ${msg}`);
+					preflightResults.push(await this.recordPreflightFailure(job, msg));
 					if (this.shouldFailFast(job)) this.shouldStop = true;
 					continue;
 				}
@@ -194,7 +199,7 @@ export class Runner {
 		message: string,
 	): Promise<GateResult> {
 		if (job.type === "check") {
-			const logPath = this.logger.getLogPath(job.id);
+			const logPath = await this.logger.getLogPath(job.id);
 			const jobLogger = await this.logger.createJobLogger(job.id);
 			await jobLogger(
 				`[${new Date().toISOString()}] Health check failed\n${message}\n`,
@@ -222,6 +227,11 @@ export class Runner {
 		const health = await adapter.checkHealth({
 			checkUsageLimit: this.config.project.cli.check_usage_limit,
 		});
+		if (health.status !== "healthy") {
+			console.log(
+				`[DEBUG] Adapter ${name} check failed: ${health.status} - ${health.message}`,
+			);
+		}
 		return health.status === "healthy";
 	}
 

@@ -7,7 +7,17 @@ import { JobGenerator } from "../core/job.js";
 import { Runner } from "../core/runner.js";
 import { ConsoleReporter } from "../output/console.js";
 import { Logger } from "../output/logger.js";
-import { rotateLogs } from "./shared.js";
+import {
+	findPreviousFailures,
+	type PreviousViolation,
+} from "../utils/log-parser.js";
+import { readSessionRef, writeSessionRef } from "../utils/session-ref.js";
+import {
+	acquireLock,
+	cleanLogs,
+	hasExistingLogs,
+	releaseLock,
+} from "./shared.js";
 
 export function registerRunCommand(program: Command): void {
 	program
@@ -24,14 +34,14 @@ export function registerRunCommand(program: Command): void {
 			"Use diff for current uncommitted changes (staged and unstaged)",
 		)
 		.action(async (options) => {
+			let config: Awaited<ReturnType<typeof loadConfig>> | undefined;
+			let lockAcquired = false;
 			try {
-				const config = await loadConfig();
-
-				// Rotate logs before starting
-				await rotateLogs(config.project.log_dir);
+				config = await loadConfig();
+				await acquireLock(config.project.log_dir);
+				lockAcquired = true;
 
 				// Determine effective base branch
-				// Priority: CLI override > CI env var > config
 				const effectiveBaseBranch =
 					options.baseBranch ||
 					(process.env.GITHUB_BASE_REF &&
@@ -40,10 +50,73 @@ export function registerRunCommand(program: Command): void {
 						: null) ||
 					config.project.base_branch;
 
-				const changeDetector = new ChangeDetector(effectiveBaseBranch, {
-					commit: options.commit,
-					uncommitted: options.uncommitted,
-				});
+				// Detect rerun mode: if logs exist and no explicit diff flags, use uncommitted + inject failures
+				const logsExist = await hasExistingLogs(config.project.log_dir);
+				const isRerun = logsExist && !options.uncommitted && !options.commit;
+
+				let failuresMap:
+					| Map<string, Map<string, PreviousViolation[]>>
+					| undefined;
+				let changeOptions:
+					| { commit?: string; uncommitted?: boolean; fixBase?: string }
+					| undefined;
+
+				if (isRerun) {
+					console.log(
+						chalk.dim(
+							"Existing logs detected — running in verification mode...",
+						),
+					);
+					const previousFailures = await findPreviousFailures(
+						config.project.log_dir,
+						options.gate,
+					);
+
+					failuresMap = new Map();
+					for (const gateFailure of previousFailures) {
+						const adapterMap = new Map<string, PreviousViolation[]>();
+						for (const af of gateFailure.adapterFailures) {
+							adapterMap.set(af.adapterName, af.violations);
+						}
+						failuresMap.set(gateFailure.jobId, adapterMap);
+					}
+
+					if (previousFailures.length > 0) {
+						const totalViolations = previousFailures.reduce(
+							(sum, gf) =>
+								sum +
+								gf.adapterFailures.reduce(
+									(s, af) => s + af.violations.length,
+									0,
+								),
+							0,
+						);
+						console.log(
+							chalk.yellow(
+								`Found ${previousFailures.length} gate(s) with ${totalViolations} previous violation(s)`,
+							),
+						);
+					}
+
+					changeOptions = { uncommitted: true };
+					const fixBase = await readSessionRef(config.project.log_dir);
+					if (fixBase) {
+						changeOptions.fixBase = fixBase;
+					}
+				} else if (options.commit || options.uncommitted) {
+					changeOptions = {
+						commit: options.commit,
+						uncommitted: options.uncommitted,
+					};
+				}
+
+				const changeDetector = new ChangeDetector(
+					effectiveBaseBranch,
+					changeOptions || {
+						commit: options.commit,
+						uncommitted: options.uncommitted,
+					},
+				);
 				const expander = new EntryPointExpander();
 				const jobGen = new JobGenerator(config);
 
@@ -52,6 +125,7 @@ export function registerRunCommand(program: Command): void {
 
 				if (changes.length === 0) {
 					console.log(chalk.green("No changes detected."));
+					await releaseLock(config.project.log_dir);
 					process.exit(0);
 				}
 
@@ -69,6 +143,7 @@ export function registerRunCommand(program: Command): void {
 
 				if (jobs.length === 0) {
 					console.log(chalk.yellow("No applicable gates for these changes."));
+					await releaseLock(config.project.log_dir);
 					process.exit(0);
 				}
 
@@ -80,14 +155,25 @@ export function registerRunCommand(program: Command): void {
 					config,
 					logger,
 					reporter,
-					undefined,
-					undefined,
+					failuresMap,
+					changeOptions,
 					effectiveBaseBranch,
 				);
 
 				const success = await runner.run(jobs);
+
+				if (success) {
+					await cleanLogs(config.project.log_dir);
+				} else {
+					await writeSessionRef(config.project.log_dir);
+				}
+
+				await releaseLock(config.project.log_dir);
 				process.exit(success ? 0 : 1);
 			} catch (error: unknown) {
+				if (config && lockAcquired) {
+					await releaseLock(config.project.log_dir);
+				}
 				const err = error as { message?: string };
 				console.error(chalk.red("Error:"), err.message);
 				process.exit(1);

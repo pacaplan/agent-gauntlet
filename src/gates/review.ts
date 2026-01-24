@@ -1,4 +1,6 @@
 import { exec } from "node:child_process";
+import fs from "node:fs/promises";
+import path from "node:path";
 import { promisify } from "node:util";
 import { getAdapter } from "../cli-adapters/index.js";
 import type {
@@ -10,8 +12,11 @@ import {
 	isValidViolationLocation,
 	parseDiff,
 } from "../utils/diff-parser.js";
-import type { PreviousViolation } from "../utils/log-parser.js";
-import type { GateResult } from "./result.js";
+import type {
+	GateResult,
+	PreviousViolation,
+	ReviewFullJsonOutput,
+} from "./result.js";
 
 const execAsync = promisify(exec);
 
@@ -35,6 +40,7 @@ CRITICAL SCOPE RESTRICTIONS:
 
 IMPORTANT: You must output ONLY a valid JSON object. Do not output any markdown text, explanations, or code blocks outside of the JSON.
 Each violation MUST include a "priority" field with one of: "critical", "high", "medium", "low".
+Each violation MUST include a "status" field set to "new".
 
 If violations are found:
 {
@@ -45,7 +51,8 @@ If violations are found:
       "line": 10,
       "issue": "Description of the violation",
       "fix": "Suggestion on how to fix it",
-      "priority": "high"
+      "priority": "high",
+      "status": "new"
     }
   ]
 }
@@ -69,6 +76,8 @@ interface ReviewJsonOutput {
 		issue: string;
 		fix?: string;
 		priority: "critical" | "high" | "medium" | "low";
+		status: "new" | "fixed" | "skipped";
+		result?: string | null;
 	}>;
 }
 
@@ -102,8 +111,13 @@ export class ReviewGateExecutor {
 		}>,
 		baseBranch: string,
 		previousFailures?: Map<string, PreviousViolation[]>,
-		changeOptions?: { commit?: string; uncommitted?: boolean },
+		changeOptions?: {
+			commit?: string;
+			uncommitted?: boolean;
+			fixBase?: string;
+		},
 		checkUsageLimit: boolean = false,
+		rerunThreshold: "critical" | "high" | "medium" | "low" = "high",
 	): Promise<GateResult> {
 		const startTime = Date.now();
 		const logBuffer: string[] = [];
@@ -197,6 +211,7 @@ export class ReviewGateExecutor {
 				// Parallel Execution Logic
 				// Check health of adapters in parallel, but only as many as needed
 				const healthyAdapters: string[] = [];
+				const healthFailures: string[] = [];
 				let prefIndex = 0;
 
 				while (
@@ -220,15 +235,17 @@ export class ReviewGateExecutor {
 						if (res.status === "healthy") {
 							healthyAdapters.push(res.toolName);
 						} else if (res.status === "unhealthy") {
-							await mainLogger(
-								`Skipping ${res.toolName}: ${res.message || "Unhealthy"}\n`,
-							);
+							const reason = res.message || "Unhealthy";
+							healthFailures.push(`${res.toolName}: ${reason}`);
+							await mainLogger(`Skipping ${res.toolName}: ${reason}\n`);
 						}
 					}
 				}
 
 				if (healthyAdapters.length < required) {
-					const msg = `Not enough healthy adapters. Need ${required}, found ${healthyAdapters.length}.`;
+					const failures =
+						healthFailures.length > 0 ? ` (${healthFailures.join(", ")})` : "";
+					const msg = `Not enough healthy adapters. Need ${required}, found ${healthyAdapters.length}.${failures}`;
 					await mainLogger(`Result: error - ${msg}\n`);
 					return {
 						jobId,
@@ -253,9 +270,11 @@ export class ReviewGateExecutor {
 							diff,
 							getAdapterLogger,
 							mainLogger,
+							loggerFactory,
 							previousFailures,
 							true,
 							checkUsageLimit,
+							rerunThreshold,
 						),
 					),
 				);
@@ -276,9 +295,11 @@ export class ReviewGateExecutor {
 						diff,
 						getAdapterLogger,
 						mainLogger,
+						loggerFactory,
 						previousFailures,
 						false,
 						checkUsageLimit,
+						rerunThreshold,
 					);
 					if (res) {
 						outputs.push({ adapter: res.adapter, ...res.evaluation });
@@ -301,8 +322,7 @@ export class ReviewGateExecutor {
 
 			const failed = outputs.filter((result) => result.status === "fail");
 			const errored = outputs.filter((result) => result.status === "error");
-			// If not failed or errored, it must be passed
-			// const passed = outputs.filter((result) => result.status === "pass");
+			const allSkipped = outputs.flatMap((result) => result.skipped || []);
 
 			let status: "pass" | "fail" | "error" = "pass";
 			let message = "Passed";
@@ -317,20 +337,42 @@ export class ReviewGateExecutor {
 			}
 
 			// Build detailed subResults
+
 			const subResults = outputs.map((out) => {
 				// Find specific log path for this adapter
-				// logPaths contains strings like ".../review_src_lint_codex.log"
-				// We expect the log path to contain the adapter name
-				// This is a heuristic, but likely sufficient given our naming convention
-				const specificLog = logPaths.find((p) =>
-					p.includes(`_${out.adapter}.log`),
-				);
+
+				// logPaths contains strings like ".../review_src_lint_codex.1.log"
+
+				// We expect the log path to contain the adapter name and end with .log (possibly with run number)
+
+				const specificLog = logPaths.find((p) => {
+					const filename = path.basename(p);
+
+					return (
+						filename.includes(`_${out.adapter}.`) && filename.endsWith(".log")
+					);
+				});
+
+				let logPath = specificLog;
+				if (specificLog && out.json && out.status === "fail") {
+					logPath = specificLog.replace(/\.log$/, ".json");
+				}
+
+				const errorCount =
+					out.json && Array.isArray(out.json.violations)
+						? out.json.violations.filter((v) => !v.status || v.status === "new")
+								.length
+						: out.status === "fail" || out.status === "error"
+							? 1
+							: 0;
 
 				return {
 					nameSuffix: `(${out.adapter})`,
 					status: out.status,
 					message: out.message,
-					logPath: specificLog,
+					logPath,
+					errorCount,
+					skipped: out.skipped,
 				};
 			});
 
@@ -343,6 +385,7 @@ export class ReviewGateExecutor {
 				message,
 				logPaths,
 				subResults,
+				skipped: allSkipped,
 			};
 		} catch (error: unknown) {
 			const err = error as { message?: string };
@@ -366,15 +409,26 @@ export class ReviewGateExecutor {
 			adapterName: string,
 		) => Promise<(output: string) => Promise<void>>,
 		mainLogger: (output: string) => Promise<void>,
+		loggerFactory: (adapterName?: string) => Promise<{
+			logger: (output: string) => Promise<void>;
+			logPath: string;
+		}>,
 		previousFailures?: Map<string, PreviousViolation[]>,
 		skipHealthCheck: boolean = false,
 		checkUsageLimit: boolean = false,
+		rerunThreshold: "critical" | "high" | "medium" | "low" = "high",
 	): Promise<{
 		adapter: string;
 		evaluation: {
 			status: "pass" | "fail" | "error";
 			message: string;
 			json?: ReviewJsonOutput;
+			skipped?: Array<{
+				file: string;
+				line: number | string;
+				issue: string;
+				result?: string | null;
+			}>;
 		};
 	} | null> {
 		const adapter = getAdapter(toolName);
@@ -400,6 +454,7 @@ export class ReviewGateExecutor {
 			return null;
 		}
 		const adapterLogger = await getAdapterLogger(adapter.name);
+		const { logPath } = await loggerFactory(adapter.name);
 
 		try {
 			const startMsg = `[START] review:.:${config.name} (${adapter.name})`;
@@ -425,20 +480,117 @@ export class ReviewGateExecutor {
 
 			const evaluation = this.evaluateOutput(output, diff);
 
+			// Rerun Filtering: If we have previous failures, filter new violations by threshold
+			if (
+				adapterPreviousViolations.length > 0 &&
+				evaluation.json?.violations &&
+				evaluation.status === "fail"
+			) {
+				const priorities = ["critical", "high", "medium", "low"];
+				const thresholdIndex = priorities.indexOf(rerunThreshold);
+
+				const originalCount = evaluation.json.violations.length;
+
+				evaluation.json.violations = evaluation.json.violations.filter((v) => {
+					const priority = v.priority || "low";
+					const priorityIndex = priorities.indexOf(priority);
+
+					// If priority is invalid/unknown, keep it to be safe
+					if (priorityIndex === -1) return true;
+
+					// Keep if priority is equal or higher (smaller index) than threshold
+					return priorityIndex <= thresholdIndex;
+				});
+
+				const filteredByThreshold =
+					originalCount - evaluation.json.violations.length;
+
+				if (filteredByThreshold > 0) {
+					await adapterLogger(
+						`Note: ${filteredByThreshold} new violations filtered due to rerun threshold (${rerunThreshold})\n`,
+					);
+					evaluation.filteredCount =
+						(evaluation.filteredCount || 0) + filteredByThreshold;
+
+					// If all violations were filtered, update status to pass
+					if (evaluation.json.violations.length === 0) {
+						evaluation.status = "pass";
+						evaluation.message = `Passed (${filteredByThreshold} below-threshold violations filtered)`;
+						evaluation.json.status = "pass";
+					}
+				}
+			}
+
+			if (evaluation.status === "error") {
+				await adapterLogger(`Error: ${evaluation.message}\n`);
+				await mainLogger(
+					`Error parsing review from ${adapter.name}: ${evaluation.message}\n`,
+				);
+			}
+
 			if (evaluation.filteredCount && evaluation.filteredCount > 0) {
 				await adapterLogger(
 					`Note: ${evaluation.filteredCount} out-of-scope violations filtered\n`,
 				);
 			}
 
-			// Log formatted summary
+			let skipped: Array<{
+				file: string;
+				line: number | string;
+				issue: string;
+				result?: string | null;
+			}> = [];
+
+			// Log formatted summary and write JSON
 			if (evaluation.json) {
+				// Validate required fields for JSON output
+				if (evaluation.json.status === "fail") {
+					if (!Array.isArray(evaluation.json.violations)) {
+						await adapterLogger(
+							"Warning: Missing 'violations' array in failure response\n",
+						);
+					} else {
+						for (const v of evaluation.json.violations) {
+							if (
+								!v.file ||
+								v.line === undefined ||
+								v.line === null ||
+								!v.issue ||
+								!v.priority ||
+								!v.status
+							) {
+								await adapterLogger(
+									`Warning: Violation missing required fields: ${JSON.stringify(v)}\n`,
+								);
+							}
+						}
+					}
+				}
+
+				const jsonPath = await this.writeJsonResult(
+					logPath,
+					adapter.name,
+					evaluation.status,
+					output,
+					evaluation.json,
+				);
+
+				skipped = (evaluation.json.violations || [])
+					.filter((v) => v.status === "skipped")
+					.map((v) => ({
+						file: v.file,
+						line: v.line,
+						issue: v.issue,
+						result: v.result,
+					}));
+
 				await adapterLogger(`\n--- Parsed Result (${adapter.name}) ---\n`);
 				if (
 					evaluation.json.status === "fail" &&
 					Array.isArray(evaluation.json.violations)
 				) {
 					await adapterLogger(`Status: FAIL\n`);
+					await adapterLogger(`Review: ${jsonPath}\n`);
 					await adapterLogger(`Violations:\n`);
 					for (const [i, v] of evaluation.json.violations.entries()) {
 						await adapterLogger(
@@ -462,7 +614,15 @@ export class ReviewGateExecutor {
 			const resultMsg = `Review result (${adapter.name}): ${evaluation.status} - ${evaluation.message}`;
 			await adapterLogger(`${resultMsg}\n`);
 
-			return { adapter: adapter.name, evaluation };
+			return {
+				adapter: adapter.name,
+				evaluation: {
+					status: evaluation.status,
+					message: evaluation.message,
+					json: evaluation.json,
+					skipped,
+				},
+			};
 		} catch (error: unknown) {
 			const err = error as { message?: string };
 			const errorMsg = `Error running ${adapter.name}: ${err.message}`;
@@ -475,8 +635,70 @@ export class ReviewGateExecutor {
 	private async getDiff(
 		entryPointPath: string,
 		baseBranch: string,
-		options?: { commit?: string; uncommitted?: boolean },
+		options?: { commit?: string; uncommitted?: boolean; fixBase?: string },
 	): Promise<string> {
+		// If fixBase is provided (rerun mode)
+		if (options?.fixBase) {
+			// Validate fixBase to prevent command injection
+			if (!/^[a-f0-9]+$/.test(options.fixBase)) {
+				throw new Error(`Invalid session ref: ${options.fixBase}`);
+			}
+
+			const pathArg = this.pathArg(entryPointPath);
+			try {
+				// 1. Diff against the snapshot (handles tracked files and untracked files that were in snapshot)
+				const diff = await this.execDiff(
+					`git diff ${options.fixBase}${pathArg}`,
+				);
+
+				// 2. Identify new untracked files that weren't in the snapshot
+				const { stdout: untrackedStdout } = await execAsync(
+					`git ls-files --others --exclude-standard${pathArg}`,
+					{ maxBuffer: MAX_BUFFER_BYTES },
+				);
+				const currentUntracked = new Set(this.parseLines(untrackedStdout));
+
+				const { stdout: snapshotFilesStdout } = await execAsync(
+					`git ls-tree -r --name-only ${options.fixBase}${pathArg}`,
+					{ maxBuffer: MAX_BUFFER_BYTES },
+				);
+				const snapshotFiles = new Set(this.parseLines(snapshotFilesStdout));
+
+				const newUntracked = [...currentUntracked].filter(
+					(f) => !snapshotFiles.has(f),
+				);
+				const newUntrackedDiffs: string[] = [];
+
+				for (const file of newUntracked) {
+					try {
+						const d = await this.execDiff(
+							`git diff --no-index -- /dev/null ${this.quoteArg(file)}`,
+						);
+						if (d.trim()) newUntrackedDiffs.push(d);
+					} catch (error: unknown) {
+						const err = error as { message?: string; stderr?: string };
+						const msg = [err.message, err.stderr].filter(Boolean).join("\n");
+						if (
+							!msg.includes("Could not access") &&
+							!msg.includes("ENOENT") &&
+							!msg.includes("No such file")
+						) {
+							throw error;
+						}
+					}
+				}
+
+				return [diff, ...newUntrackedDiffs].filter(Boolean).join("\n");
+			} catch (error) {
+				console.warn(
+					"Warning: Failed to compute diff against fixBase %s, falling back to full uncommitted diff.",
+					options.fixBase,
+					error instanceof Error ? error.message : error,
+				);
+				// Fall through to standard uncommitted logic
+			}
+		}
+
 		// If uncommitted mode is explicitly requested
 		if (options?.uncommitted) {
 			const pathArg = this.pathArg(entryPointPath);
@@ -603,39 +825,69 @@ export class ReviewGateExecutor {
 	private buildPreviousFailuresSection(
 		violations: PreviousViolation[],
 	): string {
-		const lines = [
-			"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━",
-			"PREVIOUS FAILURES TO VERIFY (from last run)",
-			"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━",
-			"",
-			"The following violations were identified in the previous review. Your PRIMARY TASK is to verify whether these specific issues have been fixed in the current changes:",
-			"",
-		];
+		// Only re-verify violations marked as 'fixed'
+		const toVerify = violations.filter((v) => v.status === "fixed");
+		const unaddressed = violations.filter(
+			(v) => v.status === "new" || !v.status,
+		);
 
-		violations.forEach((v, i) => {
-			lines.push(`${i + 1}. ${v.file}:${v.line} - ${v.issue}`);
-			if (v.fix) {
-				lines.push(`   Suggested fix: ${v.fix}`);
-			}
+		// Extract unique files from violations for scoping new issue detection
+		const affectedFiles = [...new Set(violations.map((v) => v.file))];
+
+		const lines: string[] = [];
+
+		lines.push(`━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+RERUN MODE: VERIFY PREVIOUS FIXES ONLY
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+This is a RERUN review. The agent attempted to fix some of the violations listed below.
+Your task is STRICTLY LIMITED to verifying the fixes for violations marked as FIXED.
+
+PREVIOUS VIOLATIONS TO VERIFY:
+`);
+
+		if (toVerify.length === 0) {
+			lines.push("(No violations were marked as FIXED for verification)\n");
+		} else {
+			toVerify.forEach((v, i) => {
+				lines.push(`${i + 1}. ${v.file}:${v.line} - ${v.issue}`);
+				if (v.fix) {
+					lines.push(`   Suggested fix: ${v.fix}`);
+				}
+				if (v.result) {
+					lines.push(`   Agent result: ${v.result}`);
+				}
+				lines.push("");
+			});
+		}
+
+		if (unaddressed.length > 0) {
+			lines.push(`UNADDRESSED VIOLATIONS (STILL FAILING):
+The following violations were NOT marked as fixed or skipped and are still active failures:
+`);
+			unaddressed.forEach((v, i) => {
+				lines.push(`${i + 1}. ${v.file}:${v.line} - ${v.issue}`);
+			});
 			lines.push("");
-		});
+		}
 
-		lines.push("INSTRUCTIONS:");
-		lines.push(
-			"- Check if each violation listed above has been addressed in the diff",
-		);
-		lines.push(
-			"- For violations that are fixed, confirm they no longer appear",
-		);
-		lines.push(
-			"- For violations that remain unfixed, include them in your violations array",
-		);
-		lines.push("- Also check for any NEW violations in the changed code");
-		lines.push(
-			'- Return status "pass" only if ALL previous violations are fixed AND no new violations exist',
-		);
-		lines.push("");
-		lines.push("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+		lines.push(`STRICT INSTRUCTIONS FOR RERUN MODE:
+
+1. VERIFY FIXES: Check if each violation marked as FIXED above has been addressed
+   - For violations that are fixed, confirm they no longer appear
+   - For violations that remain unfixed, include them in your violations array (status: "new")
+
+2. UNADDRESSED VIOLATIONS: You MUST include all UNADDRESSED violations listed above in your output array if they still exist.
+
+3. CHECK FOR REGRESSIONS ONLY: You may ONLY report NEW violations if they:
+   - Are in FILES that were modified to fix the above violations: ${affectedFiles.join(", ")}
+   - Are DIRECTLY caused by the fix changes (e.g., a fix introduced a new bug)
+   - Are in the same function/region that was modified to address a previous violation
+
+4. Return status "pass" ONLY if ALL previous violations (including unaddressed ones) are now fixed AND no regressions were introduced.
+   Otherwise, return status "fail" and list all remaining violations.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`);
 
 		return lines.join("\n");
 	}
@@ -769,6 +1021,26 @@ export class ReviewGateExecutor {
 		const msg = `Found ${violationCount} violations`;
 
 		return { status: "fail", message: msg, json, filteredCount };
+	}
+
+	private async writeJsonResult(
+		logPath: string,
+		adapter: string,
+		status: "pass" | "fail" | "error",
+		rawOutput: string,
+		json: ReviewJsonOutput,
+	): Promise<string> {
+		const jsonPath = logPath.replace(/\.log$/, ".json");
+		const fullOutput: ReviewFullJsonOutput = {
+			adapter,
+			timestamp: new Date().toISOString(),
+			status,
+			rawOutput,
+			violations: json.violations || [],
+		};
+
+		await fs.writeFile(jsonPath, JSON.stringify(fullOutput, null, 2));
+		return jsonPath;
 	}
 
 	private parseLines(stdout: string): string[] {

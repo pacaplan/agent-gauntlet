@@ -1,5 +1,9 @@
 ---
 num_reviews: 2
+reviewers:
+  - codex
+  - gemini
+  - claude
 ---
 
 # Change Review

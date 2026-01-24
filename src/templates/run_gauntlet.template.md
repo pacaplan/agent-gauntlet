@@ -18,17 +18,24 @@ Execute the autonomous verification suite.
 
 **Review trust level: medium** — Fix issues you reasonably agree with or believe the human wants fixed. Skip issues that are purely stylistic, subjective, or that you believe the human would not want changed. When you skip an issue, briefly state what was skipped and why.
 
-1. Run `agent-gauntlet run`.
+0. Run `agent-gauntlet clean` to archive any previous log files
+1. Run `agent-gauntlet run`
 2. If it fails:
-   - Check the console output for "Fix instructions: available" messages.
-   - Read the log files in `gauntlet_logs/` to understand exactly what went wrong.
-   - If fix instructions are available, they will be in the log file under a "--- Fix Instructions ---" section—carefully read and apply them FIRST before attempting other fixes.
-3. Fix any code or logic errors found by the tools or AI reviewers, prioritizing higher-priority violations (critical > high > medium > low).
-4. Apply the trust level above when deciding whether to act on AI reviewer feedback. If you skip an issue due to the trust threshold, report it with a brief explanation (e.g., "Skipped: [issue summary] — reason: [stylistic/subjective/disagree]").
-5. Do NOT commit your changes yet—keep them uncommitted so the rerun command can review them.
-6. Run `agent-gauntlet rerun` to verify your fixes. The rerun command reviews only uncommitted changes and uses previous failures as context.
-7. Repeat steps 2-6 until one of the following termination conditions is met:
-   - All gates pass
-   - You are skipping remaining issues
-   - Still failing after 3 rerun attempts
-8. Once all gates pass, do NOT commit or push your changes—await the human's review and explicit instruction to commit.
+   - Identify the failed gates from the console output.
+   - For CHECK failures: Read the `.log` file path provided in the output.
+   - For REVIEW failures: Read the `.json` file path provided in the "Review: <path>" output.
+3. Address the violations:
+   - For REVIEW violations: You MUST update the `"status"` and `"result"` fields in the provided `.json` file for EACH violation.
+     - Set `"status": "fixed"` and add a brief description to `"result"` for issues you fix.
+     - Set `"status": "skipped"` and add a brief reason to `"result"` for issues you skip (based on the trust level).
+     - Do NOT modify any other attributes (file, line, issue, priority) in the JSON file.
+   - Apply the trust level above when deciding whether to act on AI reviewer feedback.
+4. Run `agent-gauntlet run` again to verify your fixes. It will detect existing logs and automatically switch to verification mode.
+5. Repeat steps 2-5 until one of the following termination conditions is met:
+   - "Status: Passed" appears in the output (logs are automatically archived)
+   - "Status: Passed with warnings" appears in the output (remaining issues were skipped)
+   - Still failing after 3 attempts -> Run `agent-gauntlet clean` to archive logs and reset state.
+6. Provide a summary of the session:
+   - Issues Fixed: (list key fixes)
+   - Issues Skipped: (list skipped items and reasons)
+   - Outstanding Failures: (if any, explain why they couldn't be resolved)

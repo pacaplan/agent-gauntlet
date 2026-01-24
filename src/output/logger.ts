@@ -6,8 +6,38 @@ function formatTimestamp(): string {
 	return new Date().toISOString();
 }
 
+/**
+ * Compute the next run number for a given log file prefix.
+ * Scans existing files in logDir and returns max+1 (or 1 if none exist).
+ */
+async function nextRunNumber(logDir: string, prefix: string): Promise<number> {
+	try {
+		const files = await fs.readdir(logDir);
+		let max = 0;
+		const expectedStart = `${prefix}.`;
+		const expectedEnd = ".log";
+		for (const file of files) {
+			if (!file.startsWith(expectedStart) || !file.endsWith(expectedEnd)) {
+				continue;
+			}
+			const middle = file.slice(
+				expectedStart.length,
+				file.length - expectedEnd.length,
+			);
+			if (/^\d+$/.test(middle)) {
+				const n = parseInt(middle, 10);
+				if (n > max) max = n;
+			}
+		}
+		return max + 1;
+	} catch {
+		return 1;
+	}
+}
+
 export class Logger {
 	private initializedFiles: Set<string> = new Set();
+	private runNumberCache: Map<string, number> = new Map();
 
 	constructor(private logDir: string) {}
 
@@ -19,19 +49,22 @@ export class Logger {
 		// No-op - using append mode
 	}
 
-	getLogPath(jobId: string, adapterName?: string): string {
+	async getLogPath(jobId: string, adapterName?: string): Promise<string> {
 		const safeName = sanitizeJobId(jobId);
-		if (adapterName) {
-			return path.join(this.logDir, `${safeName}_${adapterName}.log`);
+		const prefix = adapterName ? `${safeName}_${adapterName}` : safeName;
+
+		if (!this.runNumberCache.has(prefix)) {
+			const num = await nextRunNumber(this.logDir, prefix);
+			this.runNumberCache.set(prefix, num);
 		}
-		return path.join(this.logDir, `${safeName}.log`);
+		const runNum = this.runNumberCache.get(prefix) ?? 1;
+		return path.join(this.logDir, `${prefix}.${runNum}.log`);
 	}
 
 	private async initFile(logPath: string): Promise<void> {
 		if (this.initializedFiles.has(logPath)) {
 			return;
 		}
-		// Add to set BEFORE writing to make this more atomic
 		this.initializedFiles.add(logPath);
 		await fs.writeFile(logPath, "");
 	}
@@ -39,7 +72,7 @@ export class Logger {
 	async createJobLogger(
 		jobId: string,
 	): Promise<(text: string) => Promise<void>> {
-		const logPath = this.getLogPath(jobId);
+		const logPath = await this.getLogPath(jobId);
 		await this.initFile(logPath);
 
 		return async (text: string) => {
@@ -61,7 +94,7 @@ export class Logger {
 		adapterName?: string,
 	) => Promise<{ logger: (text: string) => Promise<void>; logPath: string }> {
 		return async (adapterName?: string) => {
-			const logPath = this.getLogPath(jobId, adapterName);
+			const logPath = await this.getLogPath(jobId, adapterName);
 			await this.initFile(logPath);
 
 			const logger = async (text: string) => {
