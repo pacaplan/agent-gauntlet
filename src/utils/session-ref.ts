@@ -3,8 +3,27 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { promisify } from "node:util";
 
-const execAsync = promisify(exec);
 const SESSION_REF_FILENAME = ".session_ref";
+
+// Exported for testing - allows injection of mock exec
+export let execFn: (cmd: string) => Promise<{ stdout: string; stderr: string }> =
+	promisify(exec);
+
+/**
+ * Set the exec function (for testing)
+ */
+export function setExecFn(
+	fn: (cmd: string) => Promise<{ stdout: string; stderr: string }>,
+): void {
+	execFn = fn;
+}
+
+/**
+ * Reset the exec function to the real implementation
+ */
+export function resetExecFn(): void {
+	execFn = promisify(exec);
+}
 
 /**
  * Captures the current git state (working tree) as a commit SHA
@@ -15,12 +34,12 @@ export async function writeSessionRef(logDir: string): Promise<void> {
 	try {
 		// Create a stash of the current state (including untracked files)
 		// This returns a commit SHA but doesn't modify the working tree
-		const { stdout } = await execAsync("git stash create --include-untracked");
+		const { stdout } = await execFn("git stash create --include-untracked");
 		let sha = stdout.trim();
 
 		if (!sha) {
 			// If no changes to stash (clean working tree), use HEAD
-			const { stdout: headSha } = await execAsync("git rev-parse HEAD");
+			const { stdout: headSha } = await execFn("git rev-parse HEAD");
 			sha = headSha.trim();
 		}
 

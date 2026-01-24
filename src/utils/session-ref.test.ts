@@ -1,33 +1,13 @@
-import { afterEach, describe, expect, it, mock } from "bun:test";
+import { afterEach, beforeEach, describe, expect, it, mock } from "bun:test";
 import fs from "node:fs/promises";
 import path from "node:path";
-
-// Mocks
-const mockExec = mock((cmd: string, ...args: unknown[]) => {
-	const cb = args[args.length - 1] as (
-		err: Error | null,
-		result: { stdout: string; stderr: string },
-	) => void;
-
-	if (cmd.includes("git stash create")) {
-		cb(null, { stdout: "stash-sha\n", stderr: "" });
-	} else if (cmd.includes("git rev-parse HEAD")) {
-		cb(null, { stdout: "head-sha\n", stderr: "" });
-	} else {
-		cb(new Error("Unknown command"), { stdout: "", stderr: "" });
-	}
-	// biome-ignore lint/suspicious/noExplicitAny: child_process exec returns ChildProcess
-	return {} as any;
-});
-
-mock.module("node:child_process", () => ({
-	exec: mockExec,
-}));
-
-// Import after mocks
-const { writeSessionRef, readSessionRef, clearSessionRef } = await import(
-	"./session-ref"
-);
+import {
+	clearSessionRef,
+	readSessionRef,
+	resetExecFn,
+	setExecFn,
+	writeSessionRef,
+} from "./session-ref";
 
 describe("Session Ref Utils", () => {
 	const logDir = path.join(
@@ -35,8 +15,26 @@ describe("Session Ref Utils", () => {
 		`session-ref-test-${Math.random().toString(36).slice(2)}`,
 	);
 
+	// Mock exec function
+	const mockExec = mock(
+		async (cmd: string): Promise<{ stdout: string; stderr: string }> => {
+			if (cmd.includes("git stash create")) {
+				return { stdout: "stash-sha\n", stderr: "" };
+			}
+			if (cmd.includes("git rev-parse HEAD")) {
+				return { stdout: "head-sha\n", stderr: "" };
+			}
+			throw new Error("Unknown command");
+		},
+	);
+
+	beforeEach(() => {
+		setExecFn(mockExec);
+	});
+
 	afterEach(async () => {
 		mockExec.mockClear();
+		resetExecFn();
 		await fs.rm(logDir, { recursive: true, force: true });
 	});
 
@@ -52,18 +50,14 @@ describe("Session Ref Utils", () => {
 		});
 
 		it("should write HEAD SHA when git stash create returns empty (clean tree)", async () => {
-			mockExec.mockImplementationOnce((cmd: string, ...args: unknown[]) => {
-				const cb = args[args.length - 1] as (
-					err: Error | null,
-					result: { stdout: string; stderr: string },
-				) => void;
+			mockExec.mockImplementationOnce(async (cmd: string) => {
 				if (cmd.includes("git stash create")) {
-					cb(null, { stdout: "", stderr: "" });
-				} else if (cmd.includes("git rev-parse HEAD")) {
-					cb(null, { stdout: "head-sha\n", stderr: "" });
+					return { stdout: "", stderr: "" };
 				}
-				// biome-ignore lint/suspicious/noExplicitAny: child_process exec returns ChildProcess
-				return {} as any;
+				if (cmd.includes("git rev-parse HEAD")) {
+					return { stdout: "head-sha\n", stderr: "" };
+				}
+				throw new Error("Unknown command");
 			});
 
 			await writeSessionRef(logDir);
