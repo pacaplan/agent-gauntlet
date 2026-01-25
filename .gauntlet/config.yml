@@ -17,6 +17,7 @@ entry_points:
       - schema-validate
     reviews:
       - code-quality
+      - apply-review
   - path: "package.json"
     checks:
       - build
