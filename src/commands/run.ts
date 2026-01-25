@@ -79,7 +79,11 @@ export function registerRunCommand(program: Command): void {
 					for (const gateFailure of previousFailures) {
 						const adapterMap = new Map<string, PreviousViolation[]>();
 						for (const af of gateFailure.adapterFailures) {
-							adapterMap.set(af.adapterName, af.violations);
+							// Use review index as key if available (new @index pattern)
+							const key = af.reviewIndex
+								? String(af.reviewIndex)
+								: af.adapterName;
+							adapterMap.set(key, af.violations);
 						}
 						failuresMap.set(gateFailure.jobId, adapterMap);
 					}

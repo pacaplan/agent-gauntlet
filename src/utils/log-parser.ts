@@ -1,12 +1,14 @@
 import fs from "node:fs/promises";
 import path from "node:path";
-import type {
-	PreviousViolation,
-	ReviewFullJsonOutput,
-} from "../gates/result.js";
+import type { ReviewFullJsonOutput } from "../gates/result.js";
+
+export type { PreviousViolation } from "../gates/result.js";
+
+import type { PreviousViolation } from "../gates/result.js";
 
 export interface AdapterFailure {
 	adapterName: string; // e.g., 'claude', 'gemini'
+	reviewIndex?: number; // 1-based review index from @N in filename
 	violations: PreviousViolation[];
 }
 
@@ -19,6 +21,30 @@ export interface GateFailures {
 }
 
 /**
+ * Parse a review filename to extract the job ID, adapter, review index, and run number.
+ * Pattern: <jobId>_<adapter>@<reviewIndex>.<runNumber>.(log|json)
+ * Returns null if the filename doesn't match the review pattern.
+ */
+export function parseReviewFilename(filename: string): {
+	jobId: string;
+	adapter: string;
+	reviewIndex: number;
+	runNumber: number;
+	ext: string;
+} | null {
+	// Match: <prefix>_<adapter>@<index>.<runNum>.(log|json)
+	const m = filename.match(/^(.+)_([^@]+)@(\d+)\.(\d+)\.(log|json)$/);
+	if (!m) return null;
+	return {
+		jobId: m[1]!,
+		adapter: m[2]!,
+		reviewIndex: parseInt(m[3]!, 10),
+		runNumber: parseInt(m[4]!, 10),
+		ext: m[5]!,
+	};
+}
+
+/**
  * Parses a JSON review file.
  */
 export async function parseJsonReviewFile(
@@ -28,14 +54,15 @@ export async function parseJsonReviewFile(
 		const content = await fs.readFile(jsonPath, "utf-8");
 		const data: ReviewFullJsonOutput = JSON.parse(content);
 		const filename = path.basename(jsonPath);
-		const jobId = filename.replace(/\.\d+\.json$/, "");
+
+		// Extract jobId: strip the _adapter@index.runNum.json suffix
+		const parsed = parseReviewFilename(filename);
+		const jobId = parsed ? parsed.jobId : filename.replace(/\.\d+\.json$/, "");
 
 		if (data.status === "pass") {
 			return null;
 		}
 
-		// Filter violations based on status for rerun mode
-		// We keep everything in the initial parse, but findPreviousFailures will handle filtering
 		const violations = (data.violations || []).map((v) => ({
 			...v,
 			status: v.status || "new",
@@ -59,6 +86,7 @@ export async function parseJsonReviewFile(
 			adapterFailures: [
 				{
 					adapterName: data.adapter,
+					reviewIndex: parsed?.reviewIndex,
 					violations,
 				},
 			],
@@ -72,12 +100,14 @@ export async function parseJsonReviewFile(
 
 /**
  * Extract the log prefix (job ID) from a numbered log filename.
- * Strips the dot-separated run number: `check_src_test.2.log` -> `check_src_test`
+ * Handles both patterns:
+ *   - Check: `check_src_test.2.log` -> `check_src_test`
+ *   - Review (new): `review_src_claude@1.2.log` -> `review_src_claude@1`
  */
 export function extractPrefix(filename: string): string {
 	// Pattern: <prefix>.<number>.(log|json)
 	const m = filename.match(/^(.+)\.\d+\.(log|json)$/);
-	if (m) return m[1];
+	if (m) return m[1]!;
 	// Fallback for non-numbered files
 	return filename.replace(/\.(log|json)$/, "");
 }
@@ -92,7 +122,10 @@ export async function parseLogFile(
 	try {
 		const content = await fs.readFile(logPath, "utf-8");
 		const filename = path.basename(logPath);
-		const jobId = extractPrefix(filename);
+
+		// Try to parse as review filename with @index pattern
+		const parsed = parseReviewFilename(filename);
+		const jobId = parsed ? parsed.jobId : extractPrefix(filename);
 
 		// Check if it's a review log
 		if (content.includes("--- Review Output")) {
@@ -106,7 +139,7 @@ export async function parseLogFile(
 				match = sectionRegex.exec(content);
 				if (!match) break;
 				sections.push({
-					adapter: match[1],
+					adapter: match[1]!,
 					startIndex: match.index,
 				});
 			}
@@ -114,7 +147,7 @@ export async function parseLogFile(
 			if (sections.length === 0) return null;
 
 			for (let i = 0; i < sections.length; i++) {
-				const currentSection = sections[i];
+				const currentSection = sections[i]!;
 				const nextSection = sections[i + 1];
 				const endIndex = nextSection ? nextSection.startIndex : content.length;
 				const sectionContent = content.substring(
@@ -123,23 +156,23 @@ export async function parseLogFile(
 				);
 
 				const violations: PreviousViolation[] = [];
-				// 1. Look for "--- Parsed Result ---"
 				const parsedResultMatch = sectionContent.match(
 					/---\s*Parsed Result(?:\s+\(([^)]+)\))?\s*---([\s\S]*?)(?:$|---)/,
 				);
 
 				if (parsedResultMatch) {
-					const parsedContent = parsedResultMatch[2];
+					const parsedContent = parsedResultMatch[2]!;
 					if (parsedContent.includes("Status: PASS")) continue;
 					const violationRegex = /^\d+\.\s+(.+?):(\d+|NaN|\?)\s+-\s+(.+)$/gm;
 					let vMatch: RegExpExecArray | null;
 					for (;;) {
 						vMatch = violationRegex.exec(parsedContent);
 						if (!vMatch) break;
-						const file = vMatch[1].trim();
-						let line: number | string = vMatch[2];
-						if (line !== "NaN" && line !== "?") line = parseInt(line, 10);
-						const issue = vMatch[3].trim();
+						const file = vMatch[1]!.trim();
+						let line: number | string = vMatch[2]!;
+						if (line !== "NaN" && line !== "?")
+							line = parseInt(line as string, 10);
+						const issue = vMatch[3]!.trim();
 						let fix: string | undefined;
 						const remainder = parsedContent.substring(
 							vMatch.index + vMatch[0].length,
@@ -150,7 +183,7 @@ export async function parseLogFile(
 							fixMatch?.index !== undefined &&
 							(nextViolationIndex === -1 || fixMatch.index < nextViolationIndex)
 						) {
-							fix = fixMatch[1].trim();
+							fix = fixMatch[1]!.trim();
 						}
 						violations.push({ file, line, issue, fix });
 					}
@@ -186,13 +219,13 @@ export async function parseLogFile(
 				if (violations.length > 0) {
 					adapterFailures.push({
 						adapterName: currentSection.adapter,
+						reviewIndex: parsed?.reviewIndex,
 						violations,
 					});
-					// Check capture group [2] (content) for status marker.
-					// Group [1] is the adapter name, Group [2] is the content.
 				} else if (parsedResultMatch?.[2]?.includes("Status: FAIL")) {
 					adapterFailures.push({
 						adapterName: currentSection.adapter,
+						reviewIndex: parsed?.reviewIndex,
 						violations: [
 							{
 								file: "unknown",
@@ -211,8 +244,6 @@ export async function parseLogFile(
 			// Check log
 			if (content.includes("Result: pass")) return null;
 
-			// Only consider it a failure if we see explicit failure markers
-			// or if it's a check log that exited with error
 			const hasFailure =
 				content.includes("Result: fail") ||
 				content.includes("Result: error") ||
@@ -220,7 +251,6 @@ export async function parseLogFile(
 
 			if (!hasFailure) return null;
 
-			// We treat check failures as a single violation for tracking purposes
 			return {
 				jobId,
 				gateName: "",
@@ -267,13 +297,12 @@ export async function reconstructHistory(
 		const runNumbers = new Set<number>();
 		for (const file of files) {
 			const m = file.match(/\.(\d+)\.(log|json)$/);
-			if (m) runNumbers.add(parseInt(m[1], 10));
+			if (m) runNumbers.add(parseInt(m[1]!, 10));
 		}
 
 		const sortedRuns = Array.from(runNumbers).sort((a, b) => a - b);
 		const iterations: RunIteration[] = [];
 
-		// Track what was failing in the previous run to identify fixes
 		let previousFailuresByJob = new Map<string, PreviousViolation[]>();
 
 		for (const runNum of sortedRuns) {
@@ -284,7 +313,6 @@ export async function reconstructHistory(
 				skipped: [],
 			};
 
-			// Find all files for this run
 			const runFiles = files.filter((f) => f.includes(`.${runNum}.`));
 			const prefixes = new Set(runFiles.map((f) => extractPrefix(f)));
 
@@ -305,10 +333,11 @@ export async function reconstructHistory(
 
 				if (failure) {
 					for (const af of failure.adapterFailures) {
-						const key = `${failure.jobId}:${af.adapterName}`;
+						const key = af.reviewIndex
+							? `${failure.jobId}:${af.reviewIndex}`
+							: `${failure.jobId}:${af.adapterName}`;
 						currentFailuresByJob.set(key, af.violations);
 
-						// Track skips
 						for (const v of af.violations) {
 							if (v.status === "skipped") {
 								iteration.skipped.push({
@@ -323,27 +352,16 @@ export async function reconstructHistory(
 						}
 					}
 				}
-
-				// Check for fixes
-				// A job is fixed if it was in previousFailuresByJob but is no longer failing in the same way
-				// For reviews, we check per adapter
-				// For checks, we check per jobId
 			}
 
-			// Identify fixes: what was failing in previous but is NOT in current (excluding skipped)
 			for (const [key, prevViolations] of previousFailuresByJob.entries()) {
 				const current = currentFailuresByJob.get(key);
-				// Split on the last colon to separate jobId from adapter.
-				// Job IDs may contain colons (e.g., "review:src:lint"), but adapter names are simple.
 				const sep = key.lastIndexOf(":");
 				const jobId = key.substring(0, sep);
 				const adapter = key.substring(sep + 1);
 
-				// Only count as fixed if NOT skipped in the CURRENT run
-
 				const trulyFixed = prevViolations.filter((pv) => {
 					if (pv.status === "skipped") return false;
-					// Is it still in current?
 					return !current?.some(
 						(cv) =>
 							cv.file === pv.file &&
@@ -382,8 +400,9 @@ export async function reconstructHistory(
 
 /**
  * Finds all previous failures from the log directory.
- * Groups files by prefix and only parses the highest-numbered log per prefix.
- * Prefers .json files over .log files for review gates.
+ * For review gates with the @<index> pattern, groups by (jobId, reviewIndex)
+ * and returns the highest-numbered run for each index.
+ * The resulting Map keys are the review index (as string) for lookup by the review gate.
  */
 export async function findPreviousFailures(
 	logDir: string,
@@ -393,8 +412,13 @@ export async function findPreviousFailures(
 		const files = await fs.readdir(logDir);
 		const gateFailures: GateFailures[] = [];
 
-		// Group files by prefix and run number, tracking available extensions
-		const prefixMap = new Map<string, Map<number, Set<string>>>();
+		// Separate review files (with @index) from check files
+		// Group review files by (jobId, reviewIndex) -> highest run number
+		const reviewSlotMap = new Map<
+			string,
+			{ filename: string; runNumber: number; ext: string }
+		>();
+		const checkPrefixMap = new Map<string, Map<number, Set<string>>>();
 
 		for (const file of files) {
 			const isLog = file.endsWith(".log");
@@ -402,28 +426,104 @@ export async function findPreviousFailures(
 			if (!isLog && !isJson) continue;
 			if (gateFilter && !file.includes(gateFilter)) continue;
 
-			const m = file.match(/^(.+)\.(\d+)\.(log|json)$/);
-			if (!m) continue;
+			const parsed = parseReviewFilename(file);
+			if (parsed) {
+				// Review file with @index pattern
+				const slotKey = `${parsed.jobId}:${parsed.reviewIndex}`;
+				const existing = reviewSlotMap.get(slotKey);
+				if (!existing || parsed.runNumber > existing.runNumber) {
+					reviewSlotMap.set(slotKey, {
+						filename: file,
+						runNumber: parsed.runNumber,
+						ext: parsed.ext,
+					});
+				}
+			} else {
+				// Check file or legacy review file
+				const m = file.match(/^(.+)\.(\d+)\.(log|json)$/);
+				if (!m) continue;
 
-			const prefix = m[1];
-			const runNum = parseInt(m[2], 10);
-			const ext = m[3];
+				const prefix = m[1]!;
+				const runNum = parseInt(m[2]!, 10);
+				const ext = m[3]!;
 
-			let runMap = prefixMap.get(prefix);
-			if (!runMap) {
-				runMap = new Map();
-				prefixMap.set(prefix, runMap);
+				let runMap = checkPrefixMap.get(prefix);
+				if (!runMap) {
+					runMap = new Map();
+					checkPrefixMap.set(prefix, runMap);
+				}
+
+				let exts = runMap.get(runNum);
+				if (!exts) {
+					exts = new Set();
+					runMap.set(runNum, exts);
+				}
+				exts.add(ext);
 			}
-
-			let exts = runMap.get(runNum);
-			if (!exts) {
-				exts = new Set();
-				runMap.set(runNum, exts);
-			}
-			exts.add(ext);
 		}
 
-		for (const [prefix, runMap] of prefixMap.entries()) {
+		// Process review files grouped by slot (jobId + reviewIndex)
+		// Group by jobId to produce a single GateFailures per job
+		const jobReviewFailures = new Map<string, AdapterFailure[]>();
+
+		for (const [slotKey, fileInfo] of reviewSlotMap.entries()) {
+			const sepIdx = slotKey.lastIndexOf(":");
+			const jobId = slotKey.substring(0, sepIdx);
+			const reviewIndex = parseInt(slotKey.substring(sepIdx + 1), 10);
+
+			let failure: GateFailures | null = null;
+			if (fileInfo.ext === "json") {
+				failure = await parseJsonReviewFile(
+					path.join(logDir, fileInfo.filename),
+				);
+			} else {
+				failure = await parseLogFile(path.join(logDir, fileInfo.filename));
+			}
+
+			if (failure) {
+				// Apply status filtering
+				for (const af of failure.adapterFailures) {
+					af.reviewIndex = reviewIndex;
+					const filteredViolations: PreviousViolation[] = [];
+					for (const v of af.violations) {
+						const status = v.status || "new";
+						if (status === "skipped") continue;
+						if (
+							status !== "new" &&
+							status !== "fixed" &&
+							status !== "skipped"
+						) {
+							console.warn(
+								`Warning: Unexpected status "${status}" for violation in ${jobId}. Treating as "new".`,
+							);
+							v.status = "new";
+						}
+						filteredViolations.push(v);
+					}
+					af.violations = filteredViolations;
+
+					if (af.violations.length > 0) {
+						if (!jobReviewFailures.has(jobId)) {
+							jobReviewFailures.set(jobId, []);
+						}
+						jobReviewFailures.get(jobId)!.push(af);
+					}
+				}
+			}
+		}
+
+		for (const [jobId, adapterFailures] of jobReviewFailures.entries()) {
+			gateFailures.push({
+				jobId,
+				gateName: "",
+				entryPoint: "",
+				adapterFailures,
+				logPath: path.join(logDir, `${jobId}.log`),
+			});
+		}
+
+		// Process check files (non-review)
+		for (const [prefix, runMap] of checkPrefixMap.entries()) {
 			const latestRun = Math.max(...runMap.keys());
 			const exts = runMap.get(latestRun);
 			if (!exts) continue;
@@ -440,17 +540,11 @@ export async function findPreviousFailures(
 			}
 
 			if (failure) {
-				// Apply status filtering and warnings
 				for (const af of failure.adapterFailures) {
 					const filteredViolations: PreviousViolation[] = [];
 					for (const v of af.violations) {
 						const status = v.status || "new";
-
-						if (status === "skipped") {
-							// Exclude skipped from re-verification
-							continue;
-						}
-
+						if (status === "skipped") continue;
 						if (
 							status !== "new" &&
 							status !== "fixed" &&
@@ -461,13 +555,11 @@ export async function findPreviousFailures(
 							);
 							v.status = "new";
 						}
-
 						filteredViolations.push(v);
 					}
 					af.violations = filteredViolations;
 				}
 
-				// Only add if there are still violations after filtering skipped
 				const totalViolations = failure.adapterFailures.reduce(
 					(sum, af) => sum + af.violations.length,
 					0,

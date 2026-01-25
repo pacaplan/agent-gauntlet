@@ -11,6 +11,7 @@ const mockLogger = {
 	createJobLogger: mock(async () => async () => {}),
 	createLoggerFactory: mock(async () => async () => {}),
 	getLogPath: mock(async () => "/tmp/log.log"),
+	getRunNumber: mock(() => 1),
 } as unknown as Logger;
 
 const mockReporter = {

@@ -156,30 +156,31 @@ describe("ReviewGateExecutor Logging", () => {
 			);
 		}
 
-		if (!result.logPaths[0]?.includes("review_src_code-quality_codex.1.log")) {
+		// With round-robin dispatch, log files use @<index> pattern
+		if (!result.logPaths[0]?.includes("review_src_code-quality_codex@1.1.log")) {
 			throw new Error(
-				`Expected result.logPaths[0] to contain "review_src_code-quality_codex.1.log" but got "${result.logPaths[0]}"`,
+				`Expected result.logPaths[0] to contain "review_src_code-quality_codex@1.1.log" but got "${result.logPaths[0]}"`,
 			);
 		}
 
-		if (!result.logPaths[1]?.includes("review_src_code-quality_claude.1.log")) {
+		if (!result.logPaths[1]?.includes("review_src_code-quality_claude@2.1.log")) {
 			throw new Error(
-				`Expected result.logPaths[1] to contain "review_src_code-quality_claude.1.log" but got "${result.logPaths[1]}"`,
+				`Expected result.logPaths[1] to contain "review_src_code-quality_claude@2.1.log" but got "${result.logPaths[1]}"`,
 			);
 		}
 
 		const files = await fs.readdir("logs");
 		const filesList = files.join(", ");
 
-		if (!files.includes("review_src_code-quality_codex.1.log")) {
+		if (!files.includes("review_src_code-quality_codex@1.1.log")) {
 			throw new Error(
-				`Expected log directory to contain "review_src_code-quality_codex.1.log" but only found: [${filesList}]`,
+				`Expected log directory to contain "review_src_code-quality_codex@1.1.log" but only found: [${filesList}]`,
 			);
 		}
 
-		if (!files.includes("review_src_code-quality_claude.1.log")) {
+		if (!files.includes("review_src_code-quality_claude@2.1.log")) {
 			throw new Error(
-				`Expected log directory to contain "review_src_code-quality_claude.1.log" but only found: [${filesList}]`,
+				`Expected log directory to contain "review_src_code-quality_claude@2.1.log" but only found: [${filesList}]`,
 			);
 		}
 
@@ -189,9 +190,9 @@ describe("ReviewGateExecutor Logging", () => {
 			);
 		}
 
-		// Verify multiplexed content
+		// Verify multiplexed content - with round-robin, codex is @1, claude is @2
 		const codexLog = await fs.readFile(
-			"logs/review_src_code-quality_codex.1.log",
+			"logs/review_src_code-quality_codex@1.1.log",
 			"utf-8",
 		);
 		if (!codexLog.includes("Starting review: code-quality")) {
@@ -199,14 +200,14 @@ describe("ReviewGateExecutor Logging", () => {
 				`Expected codex log to contain "Starting review: code-quality" but got: ${codexLog.substring(0, 200)}...`,
 			);
 		}
-		if (!codexLog.includes("Review result (codex): pass")) {
+		if (!codexLog.includes("Review result (codex@1): pass")) {
 			throw new Error(
-				`Expected codex log to contain "Review result (codex): pass" but got: ${codexLog.substring(0, 200)}...`,
+				`Expected codex log to contain "Review result (codex@1): pass" but got: ${codexLog.substring(0, 200)}...`,
 			);
 		}
 
 		const claudeLog = await fs.readFile(
-			"logs/review_src_code-quality_claude.1.log",
+			"logs/review_src_code-quality_claude@2.1.log",
 			"utf-8",
 		);
 		if (!claudeLog.includes("Starting review: code-quality")) {
@@ -214,17 +215,17 @@ describe("ReviewGateExecutor Logging", () => {
 				`Expected claude log to contain "Starting review: code-quality" but got: ${claudeLog.substring(0, 200)}...`,
 			);
 		}
-		if (!claudeLog.includes("Review result (claude): pass")) {
+		if (!claudeLog.includes("Review result (claude@2): pass")) {
 			throw new Error(
-				`Expected claude log to contain "Review result (claude): pass" but got: ${claudeLog.substring(0, 200)}...`,
+				`Expected claude log to contain "Review result (claude@2): pass" but got: ${claudeLog.substring(0, 200)}...`,
 			);
 		}
 	});
 
 	it("should be handled correctly by ConsoleReporter", async () => {
 		const jobId = "review:src:code-quality";
-		const codexPath = "logs/review_src_code-quality_codex.1.log";
-		const claudePath = "logs/review_src_code-quality_claude.1.log";
+		const codexPath = "logs/review_src_code-quality_codex@1.1.log";
+		const claudePath = "logs/review_src_code-quality_claude@2.1.log";
 
 		await fs.writeFile(
 			codexPath,

@@ -22,7 +22,7 @@ describe("Logger run-numbered filenames", () => {
 		expect(path.basename(logPath)).toBe("check_src_lint.1.log");
 	});
 
-	it("increments run number when files exist", async () => {
+	it("global run number increments based on all files", async () => {
 		await fs.writeFile(path.join(TEST_DIR, "check_src_lint.1.log"), "");
 		await fs.writeFile(path.join(TEST_DIR, "check_src_lint.2.log"), "");
 
@@ -32,39 +32,59 @@ describe("Logger run-numbered filenames", () => {
 		expect(path.basename(logPath)).toBe("check_src_lint.3.log");
 	});
 
-	it("adapter-specific logs follow prefix_adapter.N.log pattern", async () => {
+	it("adapter-specific logs follow prefix_adapter@index.N.log pattern", async () => {
+		const logger = new Logger(TEST_DIR);
+		await logger.init();
+		const logPath = await logger.getLogPath("review:src:quality", "claude", 1);
+		expect(path.basename(logPath)).toBe("review_src_quality_claude@1.1.log");
+	});
+
+	it("adapter logs without explicit index default to @1", async () => {
 		const logger = new Logger(TEST_DIR);
 		await logger.init();
 		const logPath = await logger.getLogPath("review:src:quality", "claude");
-		expect(path.basename(logPath)).toBe("review_src_quality_claude.1.log");
+		expect(path.basename(logPath)).toBe("review_src_quality_claude@1.1.log");
 	});
 
-	it("adapter logs increment independently", async () => {
+	it("global run number is shared across all file types", async () => {
 		await fs.writeFile(
-			path.join(TEST_DIR, "review_src_quality_claude.1.log"),
+			path.join(TEST_DIR, "review_src_quality_claude@1.1.log"),
 			"",
 		);
 		await fs.writeFile(
-			path.join(TEST_DIR, "review_src_quality_claude.2.log"),
+			path.join(TEST_DIR, "review_src_quality_claude@1.2.log"),
 			"",
 		);
 
 		const logger = new Logger(TEST_DIR);
 		await logger.init();
-		const claudePath = await logger.getLogPath("review:src:quality", "claude");
-		expect(path.basename(claudePath)).toBe("review_src_quality_claude.3.log");
+		const claudePath = await logger.getLogPath(
+			"review:src:quality",
+			"claude",
+			1,
+		);
+		expect(path.basename(claudePath)).toBe(
+			"review_src_quality_claude@1.3.log",
+		);
 
-		const geminiPath = await logger.getLogPath("review:src:quality", "gemini");
-		expect(path.basename(geminiPath)).toBe("review_src_quality_gemini.1.log");
+		// Different adapter same run number
+		const geminiPath = await logger.getLogPath(
+			"review:src:quality",
+			"gemini",
+			2,
+		);
+		expect(path.basename(geminiPath)).toBe(
+			"review_src_quality_gemini@2.3.log",
+		);
 	});
 
-	it("caches run number within same Logger instance", async () => {
+	it("getRunNumber returns the computed global run number", async () => {
+		await fs.writeFile(path.join(TEST_DIR, "check_src_lint.1.log"), "");
+		await fs.writeFile(path.join(TEST_DIR, "check_src_lint.2.log"), "");
+
 		const logger = new Logger(TEST_DIR);
 		await logger.init();
-
-		const first = await logger.getLogPath("check:src:lint");
-		const second = await logger.getLogPath("check:src:lint");
-		expect(first).toBe(second);
+		expect(logger.getRunNumber()).toBe(3);
 	});
 
 	it("handles empty directory (first run)", async () => {
@@ -90,12 +110,23 @@ describe("Logger run-numbered filenames", () => {
 		const logger = new Logger(TEST_DIR);
 		await logger.init();
 		const factory = logger.createLoggerFactory("review:src:quality");
-		const { logger: adapterLogger, logPath } = await factory("claude");
+		const { logger: adapterLogger, logPath } = await factory("claude", 1);
 
 		await adapterLogger("Test output");
-		expect(path.basename(logPath)).toBe("review_src_quality_claude.1.log");
+		expect(path.basename(logPath)).toBe("review_src_quality_claude@1.1.log");
 
 		const content = await fs.readFile(logPath, "utf-8");
 		expect(content).toContain("Test output");
+	});
+
+	it("different review indices produce different files", async () => {
+		const logger = new Logger(TEST_DIR);
+		await logger.init();
+
+		const path1 = await logger.getLogPath("review:src:quality", "claude", 1);
+		const path2 = await logger.getLogPath("review:src:quality", "claude", 2);
+
+		expect(path.basename(path1)).toBe("review_src_quality_claude@1.1.log");
+		expect(path.basename(path2)).toBe("review_src_quality_claude@2.1.log");
 	});
 });

@@ -105,7 +105,10 @@ export class ReviewGateExecutor {
 		jobId: string,
 		config: ReviewConfig,
 		entryPointPath: string,
-		loggerFactory: (adapterName?: string) => Promise<{
+		loggerFactory: (
+			adapterName?: string,
+			reviewIndex?: number,
+		) => Promise<{
 			logger: (output: string) => Promise<void>;
 			logPath: string;
 		}>,
@@ -121,41 +124,31 @@ export class ReviewGateExecutor {
 	): Promise<GateResult> {
 		const startTime = Date.now();
 		const logBuffer: string[] = [];
-		let logSequence = 0; // Monotonic counter for dedup
+		let logSequence = 0;
 		const activeLoggers: Array<
 			(output: string, index: number) => Promise<void>
 		> = [];
 		const logPaths: string[] = [];
-		const logPathsSet = new Set<string>(); // O(1) lookup
+		const logPathsSet = new Set<string>();
 
 		const mainLogger = async (output: string) => {
 			const seq = logSequence++;
-			// Atomic length check and push
-			// We check length directly on the array property to ensure we use the current value.
-			// Even if we exceed the limit slightly due to concurrency (impossible in single-threaded JS),
-			// it's a soft limit.
 			if (logBuffer.length < MAX_LOG_BUFFER_SIZE) {
 				logBuffer.push(output);
 			}
-			// Use allSettled to prevent failures from stopping the main logger
 			await Promise.allSettled(activeLoggers.map((l) => l(output, seq)));
 		};
 
-		const getAdapterLogger = async (adapterName: string) => {
-			const { logger, logPath } = await loggerFactory(adapterName);
+		const getAdapterLogger = async (
+			adapterName: string,
+			reviewIndex: number,
+		) => {
+			const { logger, logPath } = await loggerFactory(adapterName, reviewIndex);
 			if (!logPathsSet.has(logPath)) {
 				logPathsSet.add(logPath);
 				logPaths.push(logPath);
 			}
 
-			// Robust synchronization using index tracking.
-			// We add the logger to activeLoggers FIRST to catch all future messages.
-			// We also flush the buffer.
-			// We use 'seenIndices' to prevent duplicates if a message arrives via both paths
-			// (e.g. added to buffer and sent to activeLoggers simultaneously).
-			// This acts as the atomic counter mechanism requested to safely handle race conditions.
-			// Even if mainLogger pushes to buffer and calls activeLoggers during the snapshot flush,
-			// seenIndices will prevent double logging.
 			const seenIndices = new Set<number>();
 
 			const safeLogger = async (msg: string, index: number) => {
@@ -166,9 +159,7 @@ export class ReviewGateExecutor {
 
 			activeLoggers.push(safeLogger);
 
-			// Flush existing buffer
 			const snapshot = [...logBuffer];
-			// We pass the loop index 'i' which corresponds to the buffer index
 			await Promise.all(snapshot.map((msg, i) => safeLogger(msg, i)));
 
 			return logger;
@@ -199,73 +190,82 @@ export class ReviewGateExecutor {
 			const required = config.num_reviews ?? 1;
 			const outputs: Array<{
 				adapter: string;
+				reviewIndex: number;
 				status: "pass" | "fail" | "error";
 				message: string;
+				json?: ReviewJsonOutput;
+				skipped?: Array<{
+					file: string;
+					line: number | string;
+					issue: string;
+					result?: string | null;
+				}>;
 			}> = [];
-			const usedAdapters = new Set<string>();
 
 			const preferences = config.cli_preference || [];
 			const parallel = config.parallel ?? false;
 
-			if (parallel && required > 1) {
-				// Parallel Execution Logic
-				// Check health of adapters in parallel, but only as many as needed
-				const healthyAdapters: string[] = [];
-				const healthFailures: string[] = [];
-				let prefIndex = 0;
+			// Determine healthy adapters
+			const healthyAdapters: string[] = [];
+			const cliCache = new Map<string, boolean>();
 
-				while (
-					healthyAdapters.length < required &&
-					prefIndex < preferences.length
-				) {
-					const batchSize = required - healthyAdapters.length;
-					const batch = preferences.slice(prefIndex, prefIndex + batchSize);
-					prefIndex += batchSize;
-
-					const batchResults = await Promise.all(
-						batch.map(async (toolName) => {
-							const adapter = getAdapter(toolName);
-							if (!adapter) return { toolName, status: "missing" as const };
-							const health = await adapter.checkHealth({ checkUsageLimit });
-							return { toolName, ...health };
-						}),
-					);
-
-					for (const res of batchResults) {
-						if (res.status === "healthy") {
-							healthyAdapters.push(res.toolName);
-						} else if (res.status === "unhealthy") {
-							const reason = res.message || "Unhealthy";
-							healthFailures.push(`${res.toolName}: ${reason}`);
-							await mainLogger(`Skipping ${res.toolName}: ${reason}\n`);
+			for (const toolName of preferences) {
+				const cached = cliCache.get(toolName);
+				let isHealthy: boolean;
+				if (cached !== undefined) {
+					isHealthy = cached;
+				} else {
+					const adapter = getAdapter(toolName);
+					if (!adapter) {
+						isHealthy = false;
+					} else {
+						const health = await adapter.checkHealth({ checkUsageLimit });
+						isHealthy = health.status === "healthy";
+						if (!isHealthy) {
+							await mainLogger(
+								`Skipping ${toolName}: ${health.message || "Unhealthy"}\n`,
+							);
 						}
 					}
+					cliCache.set(toolName, isHealthy);
 				}
-
-				if (healthyAdapters.length < required) {
-					const failures =
-						healthFailures.length > 0 ? ` (${healthFailures.join(", ")})` : "";
-					const msg = `Not enough healthy adapters. Need ${required}, found ${healthyAdapters.length}.${failures}`;
-					await mainLogger(`Result: error - ${msg}\n`);
-					return {
-						jobId,
-						status: "error",
-						duration: Date.now() - startTime,
-						message: msg,
-						logPaths,
-					};
+				if (isHealthy) {
+					healthyAdapters.push(toolName);
 				}
+			}
 
-				// Launch exactly 'required' reviews in parallel
-				const selectedAdapters = healthyAdapters.slice(0, required);
-				await mainLogger(
-					`Starting parallel reviews with: ${selectedAdapters.join(", ")}\n`,
-				);
+			if (healthyAdapters.length === 0) {
+				const msg = "Review dispatch failed: no healthy adapters available";
+				await mainLogger(`Result: error - ${msg}\n`);
+				return {
+					jobId,
+					status: "error",
+					duration: Date.now() - startTime,
+					message: msg,
+					logPaths,
+				};
+			}
 
+			// Round-robin assignment over healthy adapters
+			const assignments: Array<{ adapter: string; reviewIndex: number }> = [];
+			for (let i = 0; i < required; i++) {
+				assignments.push({
+					adapter: healthyAdapters[i % healthyAdapters.length]!,
+					reviewIndex: i + 1,
+				});
+			}
+
+			await mainLogger(
+				`Dispatching ${required} review(s) via round-robin: ${assignments.map((a) => `${a.adapter}@${a.reviewIndex}`).join(", ")}\n`,
+			);
+
+			if (parallel && required > 1) {
+				// Parallel execution
 				const results = await Promise.all(
-					selectedAdapters.map((toolName) =>
+					assignments.map((assignment) =>
 						this.runSingleReview(
-							toolName,
+							assignment.adapter,
+							assignment.reviewIndex,
 							config,
 							diff,
 							getAdapterLogger,
@@ -281,35 +281,41 @@ export class ReviewGateExecutor {
 
 				for (const res of results) {
 					if (res) {
-						outputs.push({ adapter: res.adapter, ...res.evaluation });
-						usedAdapters.add(res.adapter);
+						outputs.push({
+							adapter: res.adapter,
+							reviewIndex: res.reviewIndex,
+							...res.evaluation,
+						});
 					}
 				}
 			} else {
-				// Sequential Execution Logic
-				for (const toolName of preferences) {
-					if (usedAdapters.size >= required) break;
+				// Sequential execution
+				for (const assignment of assignments) {
 					const res = await this.runSingleReview(
-						toolName,
+						assignment.adapter,
+						assignment.reviewIndex,
 						config,
 						diff,
 						getAdapterLogger,
 						mainLogger,
 						loggerFactory,
 						previousFailures,
-						false,
+						true,
 						checkUsageLimit,
 						rerunThreshold,
 					);
 					if (res) {
-						outputs.push({ adapter: res.adapter, ...res.evaluation });
-						usedAdapters.add(res.adapter);
+						outputs.push({
+							adapter: res.adapter,
+							reviewIndex: res.reviewIndex,
+							...res.evaluation,
+						});
 					}
 				}
 			}
 
-			if (usedAdapters.size < required) {
-				const msg = `Failed to complete ${required} reviews. Completed: ${usedAdapters.size}. See logs for details.`;
+			if (outputs.length < required) {
+				const msg = `Failed to complete ${required} reviews. Completed: ${outputs.length}. See logs for details.`;
 				await mainLogger(`Result: error - ${msg}\n`);
 				return {
 					jobId,
@@ -327,7 +333,6 @@ export class ReviewGateExecutor {
 			let status: "pass" | "fail" | "error" = "pass";
 			let message = "Passed";
 
-			// Determine overall status
 			if (errored.length > 0) {
 				status = "error";
 				message = `Error in ${errored.length} adapter(s)`;
@@ -336,20 +341,12 @@ export class ReviewGateExecutor {
 				message = `Failed by ${failed.length} adapter(s)`;
 			}
 
-			// Build detailed subResults
-
 			const subResults = outputs.map((out) => {
-				// Find specific log path for this adapter
-
-				// logPaths contains strings like ".../review_src_lint_codex.1.log"
-
-				// We expect the log path to contain the adapter name and end with .log (possibly with run number)
-
 				const specificLog = logPaths.find((p) => {
 					const filename = path.basename(p);
-
 					return (
-						filename.includes(`_${out.adapter}.`) && filename.endsWith(".log")
+						filename.includes(`_${out.adapter}@${out.reviewIndex}.`) &&
+						filename.endsWith(".log")
 					);
 				});
 
@@ -367,7 +364,7 @@ export class ReviewGateExecutor {
 							: 0;
 
 				return {
-					nameSuffix: `(${out.adapter})`,
+					nameSuffix: `(${out.adapter}@${out.reviewIndex})`,
 					status: out.status,
 					message: out.message,
 					logPath,
@@ -403,13 +400,18 @@ export class ReviewGateExecutor {
 
 	private async runSingleReview(
 		toolName: string,
+		reviewIndex: number,
 		config: ReviewConfig,
 		diff: string,
 		getAdapterLogger: (
 			adapterName: string,
+			reviewIndex: number,
 		) => Promise<(output: string) => Promise<void>>,
 		mainLogger: (output: string) => Promise<void>,
-		loggerFactory: (adapterName?: string) => Promise<{
+		loggerFactory: (
+			adapterName?: string,
+			reviewIndex?: number,
+		) => Promise<{
 			logger: (output: string) => Promise<void>;
 			logPath: string;
 		}>,
@@ -419,6 +421,7 @@ export class ReviewGateExecutor {
 		rerunThreshold: "critical" | "high" | "medium" | "low" = "high",
 	): Promise<{
 		adapter: string;
+		reviewIndex: number;
 		evaluation: {
 			status: "pass" | "fail" | "error";
 			message: string;
@@ -445,23 +448,25 @@ export class ReviewGateExecutor {
 			}
 		}
 
-		// Create per-adapter logger
-		// Defensive check: ensure adapter name is valid
 		if (!adapter.name || typeof adapter.name !== "string") {
 			await mainLogger(
 				`Error: Invalid adapter name: ${JSON.stringify(adapter.name)}\n`,
 			);
 			return null;
 		}
-		const adapterLogger = await getAdapterLogger(adapter.name);
-		const { logPath } = await loggerFactory(adapter.name);
+		const adapterLogger = await getAdapterLogger(adapter.name, reviewIndex);
+		const { logPath } = await loggerFactory(adapter.name, reviewIndex);
 
 		try {
-			const startMsg = `[START] review:.:${config.name} (${adapter.name})`;
+			const startMsg = `[START] review:.:${config.name} (${adapter.name}@${reviewIndex})`;
 			await adapterLogger(`${startMsg}\n`);
 
+			// Look up previous violations by review index key, falling back to adapter name for legacy logs
+			const indexKey = String(reviewIndex);
 			const adapterPreviousViolations =
-				previousFailures?.get(adapter.name) || [];
+				previousFailures?.get(indexKey) ??
+				previousFailures?.get(adapter.name) ??
+				[];
 			const finalPrompt = this.constructPrompt(
 				config,
 				adapterPreviousViolations,
@@ -495,10 +500,8 @@ export class ReviewGateExecutor {
 					const priority = v.priority || "low";
 					const priorityIndex = priorities.indexOf(priority);
 
-					// If priority is invalid/unknown, keep it to be safe
 					if (priorityIndex === -1) return true;
 
-					// Keep if priority is equal or higher (smaller index) than threshold
 					return priorityIndex <= thresholdIndex;
 				});
 
@@ -512,7 +515,6 @@ export class ReviewGateExecutor {
 					evaluation.filteredCount =
 						(evaluation.filteredCount || 0) + filteredByThreshold;
 
-					// If all violations were filtered, update status to pass
 					if (evaluation.json.violations.length === 0) {
 						evaluation.status = "pass";
 						evaluation.message = `Passed (${filteredByThreshold} below-threshold violations filtered)`;
@@ -541,9 +543,7 @@ export class ReviewGateExecutor {
 				result?: string | null;
 			}> = [];
 
-			// Log formatted summary and write JSON
 			if (evaluation.json) {
-				// Validate required fields for JSON output
 				if (evaluation.json.status === "fail") {
 					if (!Array.isArray(evaluation.json.violations)) {
 						await adapterLogger(
@@ -611,11 +611,12 @@ export class ReviewGateExecutor {
 				await adapterLogger(`---------------------\n`);
 			}
 
-			const resultMsg = `Review result (${adapter.name}): ${evaluation.status} - ${evaluation.message}`;
+			const resultMsg = `Review result (${adapter.name}@${reviewIndex}): ${evaluation.status} - ${evaluation.message}`;
 			await adapterLogger(`${resultMsg}\n`);
 
 			return {
 				adapter: adapter.name,
+				reviewIndex,
 				evaluation: {
 					status: evaluation.status,
 					message: evaluation.message,
@@ -625,7 +626,7 @@ export class ReviewGateExecutor {
 			};
 		} catch (error: unknown) {
 			const err = error as { message?: string };
-			const errorMsg = `Error running ${adapter.name}: ${err.message}`;
+			const errorMsg = `Error running ${adapter.name}@${reviewIndex}: ${err.message}`;
 			await adapterLogger(`${errorMsg}\n`);
 			await mainLogger(`${errorMsg}\n`);
 			return null;
@@ -651,12 +652,10 @@ export class ReviewGateExecutor {
 
 			const pathArg = this.pathArg(entryPointPath);
 			try {
-				// 1. Diff against the snapshot (handles tracked files and untracked files that were in snapshot)
 				const diff = await this.execDiff(
 					`git diff ${options.fixBase}${pathArg}`,
 				);
 
-				// 2. Identify new untracked files that weren't in the snapshot
 				const { stdout: untrackedStdout } = await execAsync(
 					`git ls-files --others --exclude-standard${pathArg}`,
 					{ maxBuffer: MAX_BUFFER_BYTES },
@@ -706,31 +705,25 @@ export class ReviewGateExecutor {
 					options.fixBase,
 					error instanceof Error ? error.message : error,
 				);
-				// Fall through to standard uncommitted logic
 			}
 		}
 
-		// If uncommitted mode is explicitly requested
 		if (options?.uncommitted) {
 			console.log(`[DEBUG getDiff] Using full uncommitted diff (no fixBase)`);
 			const pathArg = this.pathArg(entryPointPath);
-			// Match ChangeDetector.getUncommittedChangedFiles() behavior
 			const staged = await this.execDiff(`git diff --cached${pathArg}`);
 			const unstaged = await this.execDiff(`git diff${pathArg}`);
 			const untracked = await this.untrackedDiff(entryPointPath);
 			return [staged, unstaged, untracked].filter(Boolean).join("\n");
 		}
 
-		// If a specific commit is requested
 		if (options?.commit) {
 			const pathArg = this.pathArg(entryPointPath);
-			// Match ChangeDetector.getCommitChangedFiles() behavior
 			try {
 				return await this.execDiff(
 					`git diff ${options.commit}^..${options.commit}${pathArg}`,
 				);
 			} catch (error: unknown) {
-				// Handle initial commit case
 				const err = error as { message?: string; stderr?: string };
 				if (
 					err.message?.includes("unknown revision") ||
@@ -755,7 +748,6 @@ export class ReviewGateExecutor {
 		entryPointPath: string,
 		baseBranch: string,
 	): Promise<string> {
-		// Base branch priority is already resolved by caller
 		const baseRef = baseBranch;
 		const headRef = process.env.GITHUB_SHA || "HEAD";
 		const pathArg = this.pathArg(entryPointPath);
@@ -800,8 +792,6 @@ export class ReviewGateExecutor {
 				);
 				if (diff.trim()) diffs.push(diff);
 			} catch (error: unknown) {
-				// Only suppress errors for missing/deleted files (ENOENT or "Could not access")
-				// Re-throw other errors (permissions, git issues) so they surface properly
 				const err = error as { message?: string; stderr?: string };
 				const msg = [err.message, err.stderr].filter(Boolean).join("\n");
 				if (
@@ -809,7 +799,6 @@ export class ReviewGateExecutor {
 					msg.includes("ENOENT") ||
 					msg.includes("No such file")
 				) {
-					// File was deleted/moved between listing and diff; skip it
 					continue;
 				}
 				throw error;
@@ -837,13 +826,11 @@ export class ReviewGateExecutor {
 	private buildPreviousFailuresSection(
 		violations: PreviousViolation[],
 	): string {
-		// Only re-verify violations marked as 'fixed'
 		const toVerify = violations.filter((v) => v.status === "fixed");
 		const unaddressed = violations.filter(
 			(v) => v.status === "new" || !v.status,
 		);
 
-		// Extract unique files from violations for scoping new issue detection
 		const affectedFiles = [...new Set(violations.map((v) => v.file))];
 
 		const lines: string[] = [];
@@ -916,20 +903,16 @@ The following violations were NOT marked as fixed or skipped and are still activ
 		const diffRanges = diff ? parseDiff(diff) : undefined;
 
 		try {
-			// 1. Try to extract from markdown code block first (most reliable)
 			const jsonBlockMatch = output.match(/```json\s*([\s\S]*?)\s*```/);
 			if (jsonBlockMatch) {
 				try {
-					const json = JSON.parse(jsonBlockMatch[1]);
+					const json = JSON.parse(jsonBlockMatch[1]!);
 					return this.validateAndReturn(json, diffRanges);
 				} catch {
-					// If code block parse fails, fall back to other methods
+					// Fall through
 				}
 			}
 
-			// 2. Fallback: Find the last valid JSON object
-			// This helps when there are braces in the explanation text before the actual JSON
-			// We start from the last '}' and search backwards for a matching '{' that creates valid JSON
 			const end = output.lastIndexOf("}");
 			if (end !== -1) {
 				let start = output.lastIndexOf("{", end);
@@ -937,18 +920,16 @@ The following violations were NOT marked as fixed or skipped and are still activ
 					const candidate = output.substring(start, end + 1);
 					try {
 						const json = JSON.parse(candidate);
-						// If we successfully parsed an object with 'status', it's likely our result
 						if (json.status) {
 							return this.validateAndReturn(json, diffRanges);
 						}
 					} catch {
-						// Not valid JSON, keep searching backwards
+						// Not valid JSON, keep searching
 					}
 					start = output.lastIndexOf("{", start - 1);
 				}
 			}
 
-			// 3. Last resort: simplistic extraction (original behavior)
 			const firstStart = output.indexOf("{");
 			if (firstStart !== -1 && end !== -1 && end > firstStart) {
 				try {
@@ -982,7 +963,6 @@ The following violations were NOT marked as fixed or skipped and are still activ
 		json?: ReviewJsonOutput;
 		filteredCount?: number;
 	} {
-		// Validate Schema
 		if (!json.status || (json.status !== "pass" && json.status !== "fail")) {
 			return {
 				status: "error",
@@ -995,7 +975,6 @@ The following violations were NOT marked as fixed or skipped and are still activ
 			return { status: "pass", message: json.message || "Passed", json };
 		}
 
-		// json.status === 'fail'
 		let filteredCount = 0;
 
 		if (Array.isArray(json.violations) && diffRanges?.size) {
@@ -1003,18 +982,22 @@ The following violations were NOT marked as fixed or skipped and are still activ
 
 			json.violations = json.violations.filter(
 				(v: { file: string; line: number | string }) => {
-					const isValid = isValidViolationLocation(v.file, v.line, diffRanges);
-					if (!isValid) {
-						// Can't easily access logger here, but could return warning info
-						// console.warn(`[WARNING] Filtered violation: ${v.file}:${v.line ?? '?'} (not in diff)`);
-					}
+					// Coerce string line numbers to numbers for validation
+					const lineStr =
+						typeof v.line === "string" ? v.line.trim() : undefined;
+					const lineNum =
+						typeof v.line === "number"
+							? v.line
+							: lineStr && /^\d+$/.test(lineStr)
+								? Number(lineStr)
+								: undefined;
+					const isValid = isValidViolationLocation(v.file, lineNum, diffRanges);
 					return isValid;
 				},
 			);
 
 			filteredCount = originalCount - json.violations.length;
 
-			// If all filtered out, change to pass
 			if (json.violations.length === 0) {
 				return {
 					status: "pass",
@@ -1029,7 +1012,6 @@ The following violations were NOT marked as fixed or skipped and are still activ
 			? json.violations.length
 			: "some";
 
-		// Construct a summary message
 		const msg = `Found ${violationCount} violations`;
 
 		return { status: "fail", message: msg, json, filteredCount };

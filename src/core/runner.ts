@@ -39,6 +39,19 @@ export class Runner {
 	async run(jobs: Job[]): Promise<boolean> {
 		await this.logger.init();
 
+		// Enforce retry limit before executing gates
+		const maxRetries = this.config.project.max_retries ?? 3;
+		const currentRunNumber = this.logger.getRunNumber();
+		const maxAllowedRuns = maxRetries + 1;
+
+		if (currentRunNumber > maxAllowedRuns) {
+			console.error(
+				`Retry limit exceeded: run ${currentRunNumber} exceeds max allowed ${maxAllowedRuns} (max_retries: ${maxRetries}). Run \`agent-gauntlet clean\` to reset.`,
+			);
+			process.exitCode = 1;
+			return false;
+		}
+
 		const { runnableJobs, preflightResults } = await this.preflight(jobs);
 		this.results.push(...preflightResults);
 
@@ -54,7 +67,6 @@ export class Runner {
 		const parallelPromises = parallelJobs.map((job) => this.executeJob(job));
 
 		// Start sequential jobs
-		// We run them one by one, but concurrently with the parallel batch
 		const sequentialPromise = (async () => {
 			for (const job of sequentialJobs) {
 				if (this.shouldStop) break;
@@ -64,9 +76,21 @@ export class Runner {
 
 		await Promise.all([...parallelPromises, sequentialPromise]);
 
+		const allPassed = this.results.every((r) => r.status === "pass");
+
+		// If on the final allowed run and gates failed, report "Retry limit exceeded"
+		if (!allPassed && currentRunNumber === maxAllowedRuns) {
+			await this.reporter.printSummary(
+				this.results,
+				this.config.project.log_dir,
+				"Retry limit exceeded",
+			);
+			return false;
+		}
+
 		await this.reporter.printSummary(this.results, this.config.project.log_dir);
 
-		return this.results.every((r) => r.status === "pass");
+		return allPassed;
 	}
 
 	private async executeJob(job: Job): Promise<void> {
@@ -123,7 +147,6 @@ export class Runner {
 		this.reporter.onJobComplete(job, result);
 
 		// Handle Fail Fast (only for checks, and only when parallel is false)
-		// fail_fast can only be set on checks when parallel is false (enforced by schema)
 		if (
 			result.status !== "pass" &&
 			job.type === "check" &&
@@ -168,19 +191,21 @@ export class Runner {
 			} else {
 				const reviewConfig = job.gateConfig as ReviewGateConfig &
 					ReviewPromptFrontmatter;
-				const required = reviewConfig.num_reviews ?? 1;
-				const availableTools: string[] = [];
 
+				// Only need at least 1 healthy adapter (round-robin handles the rest)
+				let hasHealthy = false;
 				for (const toolName of reviewConfig.cli_preference || []) {
-					if (availableTools.length >= required) break;
 					const cached = cliCache.get(toolName);
 					const isAvailable = cached ?? (await this.checkAdapter(toolName));
 					cliCache.set(toolName, isAvailable);
-					if (isAvailable) availableTools.push(toolName);
+					if (isAvailable) {
+						hasHealthy = true;
+						break;
+					}
 				}
 
-				if (availableTools.length < required) {
-					const msg = `Missing CLI tools: need ${required}, found ${availableTools.length} (${availableTools.join(", ") || "none"})`;
+				if (!hasHealthy) {
+					const msg = "Preflight failed: no healthy adapters available";
 					console.error(`[PREFLIGHT] ${job.id}: ${msg}`);
 					preflightResults.push(await this.recordPreflightFailure(job, msg));
 					if (this.shouldFailFast(job)) this.shouldStop = true;
@@ -277,7 +302,6 @@ export class Runner {
 	}
 
 	private shouldFailFast(job: Job): boolean {
-		// Only checks can have fail_fast, and only when parallel is false
 		return Boolean(job.type === "check" && job.gateConfig.fail_fast);
 	}
 }

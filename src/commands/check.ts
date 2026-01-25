@@ -79,7 +79,10 @@ export function registerCheckCommand(program: Command): void {
 					for (const gateFailure of previousFailures) {
 						const adapterMap = new Map<string, PreviousViolation[]>();
 						for (const af of gateFailure.adapterFailures) {
-							adapterMap.set(af.adapterName, af.violations);
+							const key = af.reviewIndex
+								? String(af.reviewIndex)
+								: af.adapterName;
+							adapterMap.set(key, af.violations);
 						}
 						failuresMap.set(gateFailure.jobId, adapterMap);
 					}
