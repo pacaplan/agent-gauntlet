@@ -50,7 +50,7 @@ export class Runner {
 
 		if (currentRunNumber > maxAllowedRuns) {
 			console.error(
-				`Retry limit exceeded: run ${currentRunNumber} exceeds max allowed ${maxAllowedRuns} (max_retries: ${maxRetries}). Run \`agent-gauntlet clean\` to reset.`,
+				`Retry limit exceeded: run ${currentRunNumber} exceeds max allowed ${maxAllowedRuns} (max_retries: ${maxRetries}). Human input required on what to do next.`,
 			);
 			process.exitCode = 1;
 			return false;

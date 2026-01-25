@@ -17,7 +17,7 @@ Implement a **command-based Stop hook** that evaluates whether the agent should 
    - `"Status: Passed"` - All gates passed
    - `"Status: Passed with warnings"` - Gates passed with skipped items
    - `"Status: Retry limit exceeded"` - Max retries hit, agent should stop trying
-3. If none of these conditions are met, return `{"ok": false, "reason": "..."}` to force the agent to continue
+3. If none of these conditions are met, return `{"continue": false, "stopReason": "..."}` to force the agent to continue
 
 ## Why a Stop Hook (Not a Skill/Command)
 
@@ -42,7 +42,7 @@ Given the complexity of parsing console output and making nuanced decisions, I r
 Create a stop hook script that:
 1. Runs the gauntlet command and captures output
 2. Checks for termination condition strings
-3. Returns appropriate JSON: `{"decision": "block", "reason": "..."}` to continue or exits cleanly to allow stop
+3. Returns appropriate JSON: `{"continue": false, "stopReason": "..."}` to block or exits cleanly to allow stop
 
 ## Scope
 

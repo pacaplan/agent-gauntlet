@@ -3,75 +3,80 @@
 ## Implementation Tasks
 
 ### 1. Add `stop-hook` CLI command
-- [ ] Create `src/commands/stop-hook.ts`
-- [ ] Implement stdin JSON parsing for hook input
-- [ ] Add `stop_hook_active` check to prevent infinite loops
-- [ ] Add `.gauntlet/config.yml` existence check
-- [ ] Implement gauntlet execution (detect local dev vs installed)
-- [ ] Parse output for termination conditions
-- [ ] Output JSON decision when blocking
-- [ ] Register command in `src/commands/index.ts`
+- [x] Create `src/commands/stop-hook.ts`
+- [x] Implement stdin JSON parsing for hook input
+- [x] Add `stop_hook_active` check to prevent infinite loops
+- [x] Add `.gauntlet/config.yml` existence check
+- [x] Implement gauntlet execution (detect local dev vs installed)
+- [x] Parse output for termination conditions
+- [x] Output JSON decision when blocking
+- [x] Register command in `src/commands/index.ts`
 
 ### 2. Enhance `init` command with stop hook prompt
-- [ ] Add interactive prompt: "Install Claude Code stop hook? (y/n)"
-- [ ] Create `.claude/settings.local.json` with hook configuration when confirmed
-- [ ] Handle case where `.claude/` directory doesn't exist
-- [ ] Handle merge with existing settings.local.json
-- [ ] Skip prompt in non-interactive mode (no TTY)
+- [x] Add interactive prompt: "Install Claude Code stop hook? (y/n)"
+- [x] Create `.claude/settings.local.json` with hook configuration when confirmed
+- [x] Handle case where `.claude/` directory doesn't exist
+- [x] Handle merge with existing settings.local.json
+- [x] Skip prompt in non-interactive mode (no TTY)
 
 ### 3. Unit Tests: stop-hook command
 
 #### Protocol Compliance
-- [ ] Test: valid JSON input is parsed correctly (extracts stop_hook_active, cwd)
-- [ ] Test: invalid JSON input allows stop (exit 0, no error)
-- [ ] Test: empty stdin allows stop (exit 0)
+- [x] Test: valid JSON input is parsed correctly (extracts stop_hook_active, cwd)
+- [x] Test: invalid JSON input allows stop (exit 0, no error)
+- [x] Test: empty stdin allows stop (exit 0)
 
 #### Infinite Loop Prevention
-- [ ] Test: stop_hook_active=true exits 0 immediately without running gauntlet
-- [ ] Test: stop_hook_active=false proceeds to config check
+- [x] Test: stop_hook_active=true exits 0 immediately without running gauntlet
+- [x] Test: stop_hook_active=false proceeds to config check
 
 #### Gauntlet Project Detection
-- [ ] Test: missing .gauntlet/config.yml exits 0 (allows stop)
-- [ ] Test: existing .gauntlet/config.yml proceeds to run gauntlet
+- [x] Test: missing .gauntlet/config.yml exits 0 (allows stop)
+- [x] Test: existing .gauntlet/config.yml proceeds to run gauntlet
 
 #### Gauntlet Execution
-- [ ] Test: local dev environment uses `bun src/index.ts run`
-- [ ] Test: installed package environment uses `agent-gauntlet run`
-- [ ] Test: gauntlet execution error allows stop (exit 0)
+- [x] Test: local dev environment uses `bun src/index.ts run`
+- [x] Test: installed package environment uses `agent-gauntlet run`
+- [x] Test: gauntlet execution error allows stop (exit 0)
 
 #### Termination Condition Checking
-- [ ] Test: output containing "Status: Passed" exits 0
-- [ ] Test: output containing "Status: Passed with warnings" exits 0
-- [ ] Test: output containing "Status: Retry limit exceeded" exits 0
-- [ ] Test: output without termination condition outputs block JSON
+- [x] Test: output containing "Status: Passed" exits 0
+- [x] Test: output containing "Status: Passed with warnings" exits 0
+- [x] Test: output containing "Status: Retry limit exceeded" exits 0
+- [x] Test: output without termination condition outputs block JSON
 
 #### Block Decision Output
-- [ ] Test: block JSON includes "decision": "block" and "reason" field
-- [ ] Test: block output is valid single-line JSON
+- [x] Test: block JSON includes "continue": false and "stopReason" field
+- [x] Test: block output is valid single-line JSON
+
+#### Infrastructure Error Detection
+- [x] Test: output containing "A gauntlet run is already in progress" allows stop
+- [x] Test: regular gauntlet failures do not trigger infrastructure error detection
+- [x] Test: broad patterns like "command not found" are NOT matched (avoids false positives)
 
 ### 4. Unit Tests: init hook installation
 
 #### Stop Hook Installation Prompt
-- [ ] Test: user responds "y" creates settings.local.json
-- [ ] Test: user responds "yes" creates settings.local.json
-- [ ] Test: user responds "n" does not create settings file
-- [ ] Test: user responds "no" does not create settings file
-- [ ] Test: non-interactive mode (no TTY) skips prompt
+- [x] Test: user responds "y" creates settings.local.json
+- [x] Test: user responds "yes" creates settings.local.json
+- [x] Test: user responds "n" does not create settings file
+- [x] Test: user responds "no" does not create settings file
+- [x] Test: non-interactive mode (no TTY) skips prompt
 
 #### Settings File Creation
-- [ ] Test: creates .claude/ directory if it doesn't exist
-- [ ] Test: creates settings.local.json in existing .claude/ directory
-- [ ] Test: merges with existing settings.local.json (preserves other hooks)
+- [x] Test: creates .claude/ directory if it doesn't exist
+- [x] Test: creates settings.local.json in existing .claude/ directory
+- [x] Test: merges with existing settings.local.json (preserves other hooks)
 
 #### Hook Configuration Content
-- [ ] Test: generated JSON has hooks.Stop array with command hook
-- [ ] Test: command is "agent-gauntlet stop-hook"
-- [ ] Test: timeout is 300
-- [ ] Test: JSON is properly formatted (indented)
+- [x] Test: generated JSON has hooks.Stop array with command hook
+- [x] Test: command is "agent-gauntlet stop-hook"
+- [x] Test: timeout is 300
+- [x] Test: JSON is properly formatted (indented)
 
 #### Installation Feedback
-- [ ] Test: successful installation shows confirmation message
-- [ ] Test: declined installation shows no hook message
+- [x] Test: successful installation shows confirmation message
+- [x] Test: declined installation shows no hook message
 
 ### 5. Integration Tests
 - [ ] Manual test: start Claude session with hook, make failing change, verify hook blocks stop

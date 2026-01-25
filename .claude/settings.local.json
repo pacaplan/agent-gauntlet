@@ -1,0 +1,15 @@
+{
+  "hooks": {
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bun src/index.ts stop-hook",
+            "timeout": 300
+          }
+        ]
+      }
+    ]
+  }
+}

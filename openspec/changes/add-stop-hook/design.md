@@ -79,30 +79,128 @@ The command reads JSON from stdin per Claude Code hook protocol:
 
 The `stop_hook_active` field is critical - it indicates whether Claude is already continuing due to a previous stop hook intervention. This prevents infinite loops.
 
+### Stdin Reading Strategy
+
+**Problem**: Claude Code may keep stdin open while waiting for the hook response. A naive implementation that waits for EOF (`stdin.on("end", ...)`) will hang indefinitely.
+
+**Solution**: Read stdin with a timeout and newline-based completion detection. Claude Code sends newline-terminated JSON, so we detect completion when a newline is received:
+
+```typescript
+const STDIN_TIMEOUT_MS = 5000; // 5 seconds
+
+async function readStdin(): Promise<string> {
+  return new Promise((resolve) => {
+    let data = "";
+    let resolved = false;
+
+    const cleanup = (result: string) => {
+      if (!resolved) {
+        resolved = true;
+        clearTimeout(timeout);
+        process.stdin.removeListener("data", onData);
+        resolve(result);
+      }
+    };
+
+    // Timeout after 5 seconds - allow stop if no input received
+    const timeout = setTimeout(() => {
+      cleanup(data.trim());
+    }, STDIN_TIMEOUT_MS);
+
+    const onData = (chunk: Buffer) => {
+      data += chunk.toString();
+      // Claude Code sends newline-terminated JSON
+      if (data.includes("\n")) {
+        cleanup(data.trim());
+      }
+    };
+
+    process.stdin.on("data", onData);
+    process.stdin.on("end", () => cleanup(data.trim()));
+    process.stdin.on("error", () => cleanup(""));
+
+    // Handle case where stdin is already closed
+    if (process.stdin.readableEnded) {
+      cleanup(data.trim());
+    }
+  });
+}
+```
+
+**Key behaviors**:
+- Returns immediately when newline is detected (Claude Code protocol)
+- Times out after 5 seconds if stdin stays open with no data
+- On `end` event, returns accumulated data (trimmed)
+- On error, returns empty string (allows stop gracefully)
+- Cleans up listeners to prevent memory leaks
+- Never blocks indefinitely
+
+### Output Protocol
+
+**Important**: Claude Code hooks expect stdout to contain only JSON responses. All verbose logging must go to stderr.
+
+```typescript
+// Verbose logs go to stderr
+function verboseLog(message: string): void {
+  console.error(`[gauntlet] ${message}`);
+}
+
+// JSON response goes to stdout
+function outputHookResponse(continueStop: boolean, stopReason?: string): void {
+  console.log(JSON.stringify({ continue: continueStop, stopReason }));
+}
+```
+
 ### Output Scenarios
 
 #### 1. Gauntlet Passed (allow stop)
 ```bash
-# Exit 0 with no JSON output = allow stop
-exit 0
+# stderr (visible in Claude Code verbose mode Ctrl+O):
+[gauntlet] Starting gauntlet validation...
+[gauntlet] Running gauntlet gates...
+[gauntlet] Gauntlet passed!
+# stdout: (empty)
+# exit 0
 ```
 
 #### 2. Gauntlet Failed (block stop)
-```json
-{"decision": "block", "reason": "Gauntlet failed. Please address the issues and run again."}
+```bash
+# stderr:
+[gauntlet] Starting gauntlet validation...
+[gauntlet] Running gauntlet gates...
+[gauntlet] Gauntlet failed, blocking stop
+# stdout (JSON only):
+{"continue":false,"stopReason":"Gauntlet gates did not pass. Please fix the issues before stopping."}
+# exit 0
 ```
-Exit code 0.
+The JSON uses the Claude Code hook protocol format with `continue` and `stopReason` fields.
 
 #### 3. No .gauntlet/config.yml (allow stop - not a gauntlet project)
 ```bash
-exit 0
+# stderr:
+[gauntlet] Starting gauntlet validation...
+[gauntlet] No gauntlet config found, allowing stop
+# stdout: (empty)
+# exit 0
 ```
 
 #### 4. Already in stop hook (prevent infinite loop)
 ```bash
-# If stop_hook_active is true, allow stop to prevent loops
+# stderr:
+[gauntlet] Starting gauntlet validation...
+[gauntlet] Stop hook already active, allowing stop
+# stdout: (empty)
+# exit 0
+```
+
+#### 5. Infrastructure error (allow stop)
+```bash
+[gauntlet] Starting gauntlet validation...
+[gauntlet] Running gauntlet gates...
+[gauntlet] Infrastructure error detected, allowing stop
 exit 0
 ```
+See "Infrastructure Error Detection" section below.
 
 ### Command Logic (pseudocode)
 
@@ -114,36 +212,59 @@ export function registerStopHookCommand(program: Command): void {
     .command("stop-hook")
     .description("Claude Code stop hook - validates gauntlet completion")
     .action(async () => {
-      // 1. Read stdin JSON
-      const input = await readStdin();
-      const { stop_hook_active } = JSON.parse(input);
+      try {
+        verboseLog("Starting gauntlet validation...");
 
-      // 2. Check if already in stop hook cycle
-      if (stop_hook_active) {
-        process.exit(0); // Allow stop to prevent infinite loop
+        // 1. Read stdin JSON (with timeout)
+        const input = await readStdin();
+        const hookInput = input.trim() ? JSON.parse(input) : {};
+
+        // 2. Check if already in stop hook cycle
+        if (hookInput.stop_hook_active) {
+          verboseLog("Stop hook already active, allowing stop");
+          process.exit(0);
+        }
+
+        // 3. Check for gauntlet config
+        if (!await fileExists(".gauntlet/config.yml")) {
+          verboseLog("No gauntlet config found, allowing stop");
+          process.exit(0);
+        }
+
+        // 4. Run gauntlet
+        verboseLog("Running gauntlet gates...");
+        const result = await runGauntlet();
+
+        // 5. Check success
+        if (result.success) {
+          verboseLog("Gauntlet passed!");
+          process.exit(0);
+        }
+
+        // 6. Check termination conditions
+        if (hasTerminationCondition(result.output)) {
+          verboseLog("Termination condition met, allowing stop");
+          process.exit(0);
+        }
+
+        // 7. Check infrastructure errors
+        if (hasInfrastructureError(result.output)) {
+          verboseLog("Infrastructure error detected, allowing stop");
+          process.exit(0);
+        }
+
+        // 8. Block stop - gauntlet failed
+        verboseLog("Gauntlet failed, blocking stop");
+        console.log(JSON.stringify({
+          continue: false,
+          stopReason: "Gauntlet gates did not pass. Please fix the issues before stopping."
+        }));
+        process.exit(0);
+      } catch (error) {
+        // On any unexpected error, allow stop
+        console.error(`Stop hook error: ${error.message}`);
+        process.exit(0);
       }
-
-      // 3. Check for gauntlet config
-      if (!await fileExists(".gauntlet/config.yml")) {
-        process.exit(0); // Not a gauntlet project
-      }
-
-      // 4. Run gauntlet (reuse existing run logic)
-      const result = await runGauntlet();
-
-      // 5. Check termination conditions
-      if (result.status === "passed" ||
-          result.status === "passed_with_warnings" ||
-          result.status === "retry_limit_exceeded") {
-        process.exit(0); // Allow stop
-      }
-
-      // 6. Block stop - output JSON decision
-      console.log(JSON.stringify({
-        decision: "block",
-        reason: "Gauntlet gates did not pass. Please review the output and address the issues."
-      }));
-      process.exit(0);
     });
 }
 ```
@@ -182,6 +303,53 @@ Three safeguards:
 1. **`stop_hook_active` check**: If the hook already triggered continuation, don't block again
 2. **Retry limit in gauntlet**: `max_retries` config prevents endless retries (default: 3)
 3. **Explicit termination conditions**: "Retry limit exceeded" allows stop after max attempts
+
+## Infrastructure Error Detection
+
+**Problem**: If gauntlet cannot run due to infrastructure issues (lock file, command not found, etc.), the stop hook should allow stop rather than blocking the user indefinitely.
+
+**Solution**: Detect specific infrastructure error patterns in gauntlet output and allow stop:
+
+```typescript
+const INFRASTRUCTURE_ERRORS = [
+  "A gauntlet run is already in progress",  // Exact gauntlet lock message
+] as const;
+
+function hasInfrastructureError(output: string): boolean {
+  return INFRASTRUCTURE_ERRORS.some((error) =>
+    output.toLowerCase().includes(error.toLowerCase()),
+  );
+}
+```
+
+**Why this specific error**:
+
+| Error | Cause | Why allow stop |
+|-------|-------|----------------|
+| `A gauntlet run is already in progress` | Lock file exists from previous run | User shouldn't be blocked due to stale lock. This is the exact message from gauntlet's lock detection. |
+
+**Note on spawn failures**: When the gauntlet command fails to spawn (ENOENT, command not found), the spawn error handler returns `success: true` directly, so these don't need to be matched in the output. We intentionally keep the infrastructure error list minimal to avoid false positives from legitimate gauntlet output (e.g., a test that checks for missing files or commands).
+
+**Important distinction**: Infrastructure errors are different from gauntlet failures. A gauntlet failure (lint errors, test failures, review issues) means the user's code has problems they should fix. An infrastructure error means the tool itself can't run properly.
+
+**Decision flow**:
+```
+Gauntlet runs
+    │
+    ├─► Exit 0 ──────────────────► Allow stop (passed)
+    │
+    └─► Exit non-zero
+            │
+            ├─► Has termination condition ──► Allow stop
+            │   (Passed, Passed with warnings,
+            │    Retry limit exceeded)
+            │
+            ├─► Has infrastructure error ───► Allow stop
+            │   (gauntlet already in progress)
+            │
+            └─► Regular failure ────────────► Block stop
+                (lint error, test failure)
+```
 
 ## File Structure
 

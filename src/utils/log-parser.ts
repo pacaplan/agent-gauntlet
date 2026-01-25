@@ -497,7 +497,14 @@ export async function findPreviousFailures(
 				// Review file with @index pattern
 				const slotKey = `${parsed.jobId}:${parsed.reviewIndex}`;
 				const existing = reviewSlotMap.get(slotKey);
-				if (!existing || parsed.runNumber > existing.runNumber) {
+				// Update if: no existing entry, higher run number, or same run number but .json (prefer .json over .log)
+				const shouldUpdate =
+					!existing ||
+					parsed.runNumber > existing.runNumber ||
+					(parsed.runNumber === existing.runNumber &&
+						parsed.ext === "json" &&
+						existing.ext === "log");
+				if (shouldUpdate) {
 					reviewSlotMap.set(slotKey, {
 						filename: file,
 						runNumber: parsed.runNumber,
