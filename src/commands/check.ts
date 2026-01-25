@@ -10,6 +10,7 @@ import { startConsoleLog } from "../output/console-log.js";
 import { Logger } from "../output/logger.js";
 import {
 	findPreviousFailures,
+	type PassedSlot,
 	type PreviousViolation,
 } from "../utils/log-parser.js";
 import { readSessionRef, writeSessionRef } from "../utils/session-ref.js";
@@ -64,16 +65,20 @@ export function registerCheckCommand(program: Command): void {
 					| { commit?: string; uncommitted?: boolean; fixBase?: string }
 					| undefined;
 
+				let passedSlotsMap: Map<string, Map<number, PassedSlot>> | undefined;
+
 				if (isRerun) {
 					console.log(
 						chalk.dim(
 							"Existing logs detected — running in verification mode...",
 						),
 					);
-					const previousFailures = await findPreviousFailures(
-						config.project.log_dir,
-						options.gate,
-					);
+					const { failures: previousFailures, passedSlots } =
+						await findPreviousFailures(
+							config.project.log_dir,
+							options.gate,
+							true,
+						);
 
 					failuresMap = new Map();
 					for (const gateFailure of previousFailures) {
@@ -86,6 +91,8 @@ export function registerCheckCommand(program: Command): void {
 						}
 						failuresMap.set(gateFailure.jobId, adapterMap);
 					}
+
+					passedSlotsMap = passedSlots;
 
 					if (previousFailures.length > 0) {
 						const totalViolations = previousFailures.reduce(
@@ -169,6 +176,7 @@ export function registerCheckCommand(program: Command): void {
 					failuresMap,
 					changeOptions,
 					effectiveBaseBranch,
+					passedSlotsMap,
 				);
 
 				const success = await runner.run(jobs);

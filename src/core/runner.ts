@@ -34,6 +34,10 @@ export class Runner {
 		private previousFailuresMap?: Map<string, Map<string, PreviousViolation[]>>,
 		private changeOptions?: { commit?: string; uncommitted?: boolean },
 		private baseBranchOverride?: string,
+		private passedSlotsMap?: Map<
+			string,
+			Map<number, { adapter: string; passIteration: number }>
+		>,
 	) {}
 
 	async run(jobs: Job[]): Promise<boolean> {
@@ -118,6 +122,7 @@ export class Runner {
 				// Use sanitized Job ID for lookup because that's what log-parser uses (based on filenames)
 				const safeJobId = sanitizeJobId(job.id);
 				const previousFailures = this.previousFailuresMap?.get(safeJobId);
+				const passedSlots = this.passedSlotsMap?.get(safeJobId);
 				const loggerFactory = this.logger.createLoggerFactory(job.id);
 				const effectiveBaseBranch =
 					this.baseBranchOverride || this.config.project.base_branch;
@@ -131,6 +136,7 @@ export class Runner {
 					this.changeOptions,
 					this.config.project.cli.check_usage_limit,
 					this.config.project.rerun_new_issue_threshold,
+					passedSlots,
 				);
 			}
 		} catch (err) {

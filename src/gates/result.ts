@@ -13,9 +13,10 @@ export interface PreviousViolation {
 export interface ReviewFullJsonOutput {
 	adapter: string;
 	timestamp: string;
-	status: "pass" | "fail" | "error";
+	status: "pass" | "fail" | "error" | "skipped_prior_pass";
 	rawOutput: string;
 	violations: PreviousViolation[];
+	passIteration?: number; // Only present when status is "skipped_prior_pass"
 }
 
 export interface GateResult {
