@@ -1,5 +1,5 @@
 ---
-num_reviews: 3
+num_reviews: 2
 reviewers:
   - codex
   - claude

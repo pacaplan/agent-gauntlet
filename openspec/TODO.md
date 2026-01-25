@@ -1,13 +1,6 @@
-return the path to files with failures back from the hook
+log reviewer token usage
 
-remove from stop hook response: "5. Run `agent-gauntlet run` to verify fixes." After fixes, agent just stops, and stop hook triggers again in order to verify.  
-
-need better stop hook status visibility. i need to run claude in verbose mode or something?
-
-we need to test this scenario
-- stop hook halts
-- stop hook succeeds
-- more changes are made - stop hook doesn't run (less than 10 mins)
+setting to enable global meta log - every command run, args, type of clean (auto or manual), whether run from hook , timestamp. use this for debugging purposes.
 
 ------------------------------------------------------------
 
