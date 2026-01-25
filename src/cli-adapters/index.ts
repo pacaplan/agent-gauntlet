@@ -27,6 +27,8 @@ export interface CLIAdapter {
 		diff: string;
 		model?: string;
 		timeoutMs?: number;
+		/** Optional callback for real-time output streaming */
+		onOutput?: (chunk: string) => void;
 	}): Promise<string>;
 	/**
 	 * Returns the project-scoped command directory path (relative to project root).

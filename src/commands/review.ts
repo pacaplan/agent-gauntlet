@@ -207,7 +207,7 @@ export function registerReviewCommand(program: Command): void {
 					await writeSessionRef(config.project.log_dir);
 				}
 
-				// Write execution state before releasing lock
+				// Write execution state before releasing lock (for interval checks)
 				await writeExecutionState(config.project.log_dir);
 				await releaseLock(config.project.log_dir);
 				restoreConsole?.();

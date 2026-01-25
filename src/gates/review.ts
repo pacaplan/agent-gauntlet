@@ -620,6 +620,10 @@ export class ReviewGateExecutor {
 				diff,
 				model: config.model,
 				timeoutMs: config.timeout ? config.timeout * 1000 : undefined,
+				onOutput: (chunk: string) => {
+					// Stream output to log file in real-time
+					adapterLogger(chunk);
+				},
 			});
 
 			await adapterLogger(
