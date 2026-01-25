@@ -17,8 +17,9 @@ interface StopHookInput {
 }
 
 interface HookResponse {
-	continue: boolean;
-	stopReason?: string;
+	decision: "block" | "approve";
+	reason?: string; // This becomes the prompt fed back to Claude
+	systemMessage?: string; // Additional context for Claude
 }
 
 interface MinimalConfig {
@@ -304,14 +305,16 @@ ${logPathSection}
 
 /**
  * Output a hook response to stdout.
- * Uses the Claude Code hook protocol format.
+ * Uses the Claude Code hook protocol format:
+ * - decision: "block" | "approve" - whether to block or allow the stop
+ * - reason: string - when blocking, this becomes the prompt fed back to Claude automatically
  */
-function outputHookResponse(continueStop: boolean, stopReason?: string): void {
+function outputHookResponse(block: boolean, reason?: string): void {
 	const response: HookResponse = {
-		continue: continueStop,
+		decision: block ? "block" : "approve",
 	};
-	if (stopReason) {
-		response.stopReason = stopReason;
+	if (reason) {
+		response.reason = reason;
 	}
 	console.log(JSON.stringify(response));
 }
@@ -467,8 +470,8 @@ export function registerStopHookCommand(program: Command): void {
 				// 12. Block stop - gauntlet did not pass
 				verboseLog("Gauntlet failed, blocking stop");
 				const consoleLogPath = await findLatestConsoleLog(logDir);
-				outputHookResponse(false, getStopReasonInstructions(consoleLogPath));
-				process.exit(0);
+				outputHookResponse(true, getStopReasonInstructions(consoleLogPath));
+				process.exit(0); // Exit 0 so Claude Code processes the JSON (decision: "block" blocks)
 			} catch (error: unknown) {
 				// On any unexpected error, allow stop to avoid blocking indefinitely
 				const err = error as { message?: string };

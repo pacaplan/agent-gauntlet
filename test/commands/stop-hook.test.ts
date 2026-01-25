@@ -278,25 +278,25 @@ describe("Stop Hook Command", () => {
 	});
 
 	describe("Hook Response Output", () => {
-		it("should output valid JSON with continue and stopReason fields", () => {
+		it("should output valid JSON with decision and reason fields", () => {
 			const hookResponse = {
-				continue: false,
-				stopReason:
+				decision: "block",
+				reason:
 					"Gauntlet gates did not pass. Please fix the issues before stopping.",
 			};
 
 			const output = JSON.stringify(hookResponse);
 			const parsed = JSON.parse(output);
 
-			expect(parsed.continue).toBe(false);
-			expect(parsed.stopReason).toBeDefined();
-			expect(typeof parsed.stopReason).toBe("string");
+			expect(parsed.decision).toBe("block");
+			expect(parsed.reason).toBeDefined();
+			expect(typeof parsed.reason).toBe("string");
 		});
 
 		it("should output single-line JSON", () => {
 			const hookResponse = {
-				continue: false,
-				stopReason: "Gauntlet gates did not pass.",
+				decision: "block",
+				reason: "Gauntlet gates did not pass.",
 			};
 
 			const output = JSON.stringify(hookResponse);

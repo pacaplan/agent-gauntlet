@@ -21,7 +21,7 @@ const globalConfigSchema = z.object({
 
 export type GlobalConfig = z.infer<typeof globalConfigSchema>;
 
-const DEFAULT_CONFIG: GlobalConfig = {
+export const DEFAULT_GLOBAL_CONFIG: GlobalConfig = {
 	stop_hook: {
 		run_interval_minutes: 10,
 	},
@@ -44,14 +44,14 @@ export async function loadGlobalConfig(): Promise<GlobalConfig> {
 			"code" in error &&
 			(error as { code: string }).code === "ENOENT"
 		) {
-			return DEFAULT_CONFIG;
+			return DEFAULT_GLOBAL_CONFIG;
 		}
 
 		// File exists but is invalid - log warning and use defaults
 		console.error(
 			`[gauntlet] Warning: Failed to parse global config at ${GLOBAL_CONFIG_PATH}, using defaults`,
 		);
-		return DEFAULT_CONFIG;
+		return DEFAULT_GLOBAL_CONFIG;
 	}
 }
 

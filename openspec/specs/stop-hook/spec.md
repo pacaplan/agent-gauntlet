@@ -87,7 +87,7 @@ The command SHALL check gauntlet output for valid termination conditions.
 #### Scenario: Gates failed
 - **GIVEN** the gauntlet output does not contain any termination condition
 - **WHEN** the command checks termination
-- **THEN** it SHALL output JSON `{"decision": "block", "reason": "..."}` and exit 0
+- **THEN** it SHALL output JSON `{"decision": "block", "reason": "..."}` and exit 0 (Claude Code processes the JSON, blocks the stop, and feeds `reason` back as the next prompt)
 
 ### Requirement: Block Decision Output
 

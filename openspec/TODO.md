@@ -1,8 +1,17 @@
-log reviewer token usage
+return back different response from hook if successful vs if max retries reached vs if failures
 
-setting to enable global meta log - every command run, args, type of clean (auto or manual), whether run from hook , timestamp. use this for debugging purposes.
+also different response if skipping execution due to time interval
+
+update task generation validation criteria to say to look for agent-gauntlet and do what it says
+
+enhance logger
+- diff stats - number of files, total size of diff (lines added and removed?)
+
 
 ------------------------------------------------------------
+
+print log reviewer token usage in log
+
 
 Clean up json files
 - don't have llm add the new attribute, script should add it
@@ -13,7 +22,8 @@ Repo cleanup and professionalize.
 
 ------------------------------------------------------------
 Implement transcript support in code reviews
--- did it do waht it said? did it complete the original objective?
+-- enhance the `openspec-apply` review with visibility of what it did
+-- things it struggled with - opportunities to improve project rules?
 
 add explanatory comments for users in the agent-gauntlet.yml above each entrypoint
 
