@@ -637,6 +637,11 @@ export class ReviewGateExecutor {
 		baseBranch: string,
 		options?: { commit?: string; uncommitted?: boolean; fixBase?: string },
 	): Promise<string> {
+		// Debug: log which diff mode is active
+		console.log(
+			`[DEBUG getDiff] entryPoint=${entryPointPath}, fixBase=${options?.fixBase ?? "none"}, uncommitted=${options?.uncommitted ?? false}, commit=${options?.commit ?? "none"}`,
+		);
+
 		// If fixBase is provided (rerun mode)
 		if (options?.fixBase) {
 			// Validate fixBase to prevent command injection
@@ -688,7 +693,13 @@ export class ReviewGateExecutor {
 					}
 				}
 
-				return [diff, ...newUntrackedDiffs].filter(Boolean).join("\n");
+				const scopedDiff = [diff, ...newUntrackedDiffs]
+					.filter(Boolean)
+					.join("\n");
+				console.log(
+					`[DEBUG getDiff] Scoped diff via fixBase: ${scopedDiff.split("\n").length} lines`,
+				);
+				return scopedDiff;
 			} catch (error) {
 				console.warn(
 					"Warning: Failed to compute diff against fixBase %s, falling back to full uncommitted diff.",
@@ -701,6 +712,7 @@ export class ReviewGateExecutor {
 
 		// If uncommitted mode is explicitly requested
 		if (options?.uncommitted) {
+			console.log(`[DEBUG getDiff] Using full uncommitted diff (no fixBase)`);
 			const pathArg = this.pathArg(entryPointPath);
 			// Match ChangeDetector.getUncommittedChangedFiles() behavior
 			const staged = await this.execDiff(`git diff --cached${pathArg}`);

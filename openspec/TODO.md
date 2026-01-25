@@ -1,7 +1,4 @@
 
-Use `zod` for schema validation (add check)
-
-write console output to a main log file as well. 
 
 ------------------------------------------------------------
 
