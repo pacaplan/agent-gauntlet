@@ -105,44 +105,40 @@ The execution state file MUST persist across clean operations to enable post-cle
 
 ## MODIFIED Requirements
 
-### Requirement: Session Reference for Re-run Diff Scoping (MODIFIED)
+### Requirement: Session Reference for Re-run Diff Scoping
 
-On run completion (success or failure), the system SHALL capture the working tree state in the unified `.execution_state` file. The separate `.session_ref` file is deprecated and SHALL be removed if present. On re-runs with existing logs, the system uses `working_tree_ref` from execution state as the diff base.
+On run completion (success or failure), the system SHALL capture the working tree state in the unified `.execution_state` file. The separate `.session_ref` file is deprecated and SHALL be removed if present. On re-runs with existing logs, the system uses `working_tree_ref` from execution state as the diff base. Session ref scoping applies to review gates only; check gates are unaffected as they do not use diff-based violation filtering.
 
-#### Scenario: Session ref captured in execution state (MODIFIED)
-- **GIVEN** a run completes (success or failure)
-- **WHEN** the system writes execution state
-- **THEN** `working_tree_ref` SHALL contain the stash SHA (or HEAD if clean)
+#### Scenario: Session ref created on first run with violations
+- **GIVEN** a first run completes (no existing logs before this run)
+- **AND** one or more review gates report violations
+- **WHEN** the run finishes writing log files
+- **THEN** the system SHALL write `working_tree_ref` to `.execution_state` in the log directory
+- **AND** the `working_tree_ref` SHALL contain a git commit SHA (from `git stash create --include-untracked`) representing the full working tree state (tracked and untracked files) at that moment
 - **AND** no separate `.session_ref` file SHALL be created
+
+#### Scenario: Session ref not created when all gates pass
+- **GIVEN** a first run completes
+- **AND** all gates pass (no violations)
+- **WHEN** the run finishes
+- **THEN** the system SHALL write `working_tree_ref` to `.execution_state`
+- **AND** the auto-clean process SHALL proceed normally
+
+#### Scenario: Re-run uses session ref for diff
+- **GIVEN** the log directory contains log files (rerun mode)
+- **AND** `.execution_state` exists with a valid `working_tree_ref`
+- **WHEN** the review gate computes its diff
+- **THEN** the diff SHALL be computed using `working_tree_ref` from `.execution_state` as the base (scoped to the entry point path)
+- **AND** the diff SHALL capture all changes since the working tree snapshot regardless of whether fixes were committed or left uncommitted
+
+#### Scenario: Session ref fallback on invalid SHA
+- **GIVEN** the `.execution_state` file exists but `working_tree_ref` contains an invalid or unreachable git SHA
+- **WHEN** the system attempts to compute the narrowed diff
+- **THEN** the system SHALL fall back to using uncommitted changes as the diff (existing behavior)
+- **AND** the system SHALL log a warning indicating the session reference was invalid
 
 #### Scenario: Legacy session ref file cleanup
 - **GIVEN** a `.session_ref` file exists from a previous version
 - **WHEN** the system writes execution state
 - **THEN** the `.session_ref` file SHALL be deleted
 
-#### Scenario: Re-run uses working tree ref from execution state (MODIFIED)
-- **GIVEN** the log directory contains log files (rerun mode)
-- **AND** `.execution_state` exists with a valid `working_tree_ref`
-- **WHEN** the review gate computes its diff
-- **THEN** the diff SHALL be computed using `working_tree_ref` from `.execution_state` as the base
-- **AND** the diff SHALL capture all changes since the working tree snapshot
-- **NOTE:** `working_tree_ref` replaces the deprecated `.session_ref` file; it stores the same stash SHA but within the unified execution state
-
-#### Scenario: Session ref no longer cleaned separately (MODIFIED)
-- **GIVEN** the clean operation executes
-- **WHEN** files are archived to `previous/`
-- **THEN** no `clearSessionRef()` call SHALL be made
-- **AND** if a legacy `.session_ref` exists, it SHALL be deleted (not archived)
-
-## REMOVED Requirements
-
-### Requirement: Session ref cleaned with logs (REMOVED)
-
-> This requirement is removed. The `.session_ref` file no longer exists as a separate file. The working tree reference is stored in `.execution_state` which persists across clean operations.
-
-> **Note:** The original requirement from `specs/run-lifecycle/spec.md` had the scenario titled "Session ref cleaned with logs" which specified that `.session_ref` would be removed during log clean. This behavior is now superseded by the unified execution state approach.
-
-~~#### Scenario: Session ref cleaned with logs~~
-~~- **GIVEN** the `.session_ref` file exists in the log directory~~
-~~- **WHEN** the log clean process executes~~
-~~- **THEN** the `.session_ref` file SHALL be removed along with the log files~~

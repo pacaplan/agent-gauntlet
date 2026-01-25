@@ -102,25 +102,11 @@ The debug log MUST rotate based on file size to prevent unbounded growth. Rotati
 
 ## MODIFIED Requirements
 
-### Requirement: Log Clean Process (MODIFIED)
+### Requirement: Log Clean Process
 
 The system MUST support a log clean operation that archives current logs into a `previous/` subdirectory. The clean operation SHALL preserve persistent state files (`.execution_state`, `.debug.log`, `.debug.log.1`) and SHALL be a no-op if the log directory does not exist or contains no current logs to archive.
 
-#### Scenario: Clean preserves execution state
-- **GIVEN** the log directory contains `.execution_state`
-- **AND** the log directory contains `.log` or `.json` files
-- **WHEN** the log clean process runs
-- **THEN** `.execution_state` SHALL remain in place (NOT moved to `previous/`)
-- **AND** all other `.log` and `.json` files SHALL be moved to `previous/`
-- **NOTE:** This is a behavioral change from the original spec which moved `.execution_state` to `previous/`. The new behavior keeps execution state persistent to enable post-clean fixBase resolution.
-
-#### Scenario: Clean preserves debug log
-- **GIVEN** the log directory contains `.debug.log` and/or `.debug.log.1`
-- **WHEN** the log clean process runs
-- **THEN** `.debug.log` SHALL remain in place
-- **AND** `.debug.log.1` SHALL remain in place (if it exists)
-
-#### Scenario: Clean with existing previous logs (MODIFIED)
+#### Scenario: Clean with existing previous logs
 - **GIVEN** the `previous/` subdirectory exists and contains files
 - **AND** the log directory root contains `.log` or `.json` files
 - **WHEN** the log clean process runs
@@ -129,10 +115,28 @@ The system MUST support a log clean operation that archives current logs into a 
 - **AND** `.execution_state` SHALL remain in place (NOT moved)
 - **AND** `.debug.log` and `.debug.log.1` SHALL remain in place
 
-#### Scenario: Clean with no previous directory (MODIFIED)
+#### Scenario: Clean with no previous directory
 - **GIVEN** the `previous/` subdirectory does not exist
 - **AND** the log directory root contains `.log` or `.json` files
 - **WHEN** the log clean process runs
 - **THEN** the `previous/` directory SHALL be created
 - **AND** all `.log` and `.json` files in the log directory root SHALL be moved into `previous/`
 - **AND** `.execution_state` SHALL remain in place (NOT moved)
+
+#### Scenario: Clean with empty log directory
+- **GIVEN** no `.log` or `.json` files exist in the log directory root
+- **WHEN** the log clean process runs
+- **THEN** the process SHALL complete successfully with no file operations
+- **AND** the `previous/` subdirectory contents SHALL NOT be modified
+
+#### Scenario: Clean when log directory does not exist
+- **GIVEN** the log directory does not exist
+- **WHEN** the log clean process runs
+- **THEN** the process SHALL complete successfully with no file operations
+- **AND** no directories SHALL be created
+
+#### Scenario: Clean preserves debug log
+- **GIVEN** the log directory contains `.debug.log` and/or `.debug.log.1`
+- **WHEN** the log clean process runs
+- **THEN** `.debug.log` SHALL remain in place
+- **AND** `.debug.log.1` SHALL remain in place (if it exists)
