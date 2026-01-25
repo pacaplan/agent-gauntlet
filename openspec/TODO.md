@@ -1,8 +1,10 @@
+enhance spec review
+- tasks should include test section for tests with unit and/or integration test for every scenario in spec files.
 
-- clear logs: do if branch is different OR if last run was on commit that is in the base branch now
-- run interval setting in order to not run more frequently than X minutes (after last one completed)
-- how to give agent instructions on how to fix, include in prompt message?
-- log cleanup should not do anything if logs dir is empty or does not exist.
+openspec reviewer
+- all tasks were implemented as described, including tests
+- update spec for divergence if needed
+- update other project docs as needed
 
 ------------------------------------------------------------
 
