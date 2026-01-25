@@ -326,6 +326,26 @@ function verboseLog(message: string): void {
 }
 
 /**
+ * Check if log files exist in the log directory (indicating a rerun is needed).
+ * Returns true if there are .log or .json files that aren't system files.
+ */
+async function hasExistingLogFiles(logDir: string): Promise<boolean> {
+	try {
+		const files = await fs.readdir(logDir);
+		// Check for any .log or .json files (excluding system files like .debug.log)
+		return files.some((file) => {
+			// Skip hidden system files
+			if (file.startsWith(".")) return false;
+			// Check for log or json files
+			return file.endsWith(".log") || file.endsWith(".json");
+		});
+	} catch {
+		// Directory doesn't exist or can't be read - no logs
+		return false;
+	}
+}
+
+/**
  * Check if the run interval has elapsed since the last gauntlet run.
  * Returns true if gauntlet should run, false if interval hasn't elapsed.
  */
@@ -352,7 +372,7 @@ async function shouldRunBasedOnInterval(
 }
 
 // Export for testing
-export { getStopReasonInstructions, findLatestConsoleLog };
+export { getStopReasonInstructions, findLatestConsoleLog, hasExistingLogFiles };
 
 export function registerStopHookCommand(program: Command): void {
 	program
@@ -405,22 +425,29 @@ export function registerStopHookCommand(program: Command): void {
 					process.exit(0);
 				}
 
-				// 7. Load global config and check run interval
-				const globalConfig = await loadGlobalConfig();
-				const intervalMinutes = globalConfig.stop_hook.run_interval_minutes;
+				// 7. Check for existing log files (indicates rerun needed)
+				const hasLogs = await hasExistingLogFiles(logDir);
 
-				if (!(await shouldRunBasedOnInterval(logDir, intervalMinutes))) {
-					verboseLog(
-						`Run interval (${intervalMinutes} min) not elapsed, allowing stop`,
-					);
-					process.exit(0);
+				// 8. Load global config and check run interval (only if no existing logs)
+				if (!hasLogs) {
+					const globalConfig = await loadGlobalConfig();
+					const intervalMinutes = globalConfig.stop_hook.run_interval_minutes;
+
+					if (!(await shouldRunBasedOnInterval(logDir, intervalMinutes))) {
+						verboseLog(
+							`Run interval (${intervalMinutes} min) not elapsed, allowing stop`,
+						);
+						process.exit(0);
+					}
+				} else {
+					verboseLog("Existing log files found, rerun required");
 				}
 
-				// 8. Run gauntlet
+				// 9. Run gauntlet
 				verboseLog("Running gauntlet gates...");
 				const result = await runGauntlet(projectCwd);
 
-				// 9. Check termination conditions
+				// 10. Check termination conditions
 				if (result.success) {
 					verboseLog("Gauntlet passed!");
 					process.exit(0);
@@ -431,13 +458,13 @@ export function registerStopHookCommand(program: Command): void {
 					process.exit(0);
 				}
 
-				// 10. Check for infrastructure errors (allow stop)
+				// 11. Check for infrastructure errors (allow stop)
 				if (hasInfrastructureError(result.output)) {
 					verboseLog("Infrastructure error detected, allowing stop");
 					process.exit(0);
 				}
 
-				// 11. Block stop - gauntlet did not pass
+				// 12. Block stop - gauntlet did not pass
 				verboseLog("Gauntlet failed, blocking stop");
 				const consoleLogPath = await findLatestConsoleLog(logDir);
 				outputHookResponse(false, getStopReasonInstructions(consoleLogPath));
