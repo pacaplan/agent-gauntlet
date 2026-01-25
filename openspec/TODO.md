@@ -1,4 +1,4 @@
-
+log cleanup should not do anything if logs dir is empty or does not exist.
 
 ------------------------------------------------------------
 

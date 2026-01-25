@@ -201,14 +201,21 @@ If multiple capabilities are affected, create multiple delta files under `change
 - [ ] 1.1 Create database schema
 - [ ] 1.2 Implement API endpoint
 - [ ] 1.3 Add frontend component
-- [ ] 1.4 Write tests
+
+## 2. Tests
+- [ ] 2.1 Unit/integration test for Scenario: Success case
+- [ ] 2.2 Unit/integration test for Scenario: Error handling
+- [ ] 2.3 ... (one test per scenario in spec)
 ```
-Always include a final validation section in `tasks.md` Example: 
+
+**Test coverage rule:** Include at least one test (unit or integration) for each scenario in the spec. This ensures all specified behaviors are verified.
+
+Always include a final validation section in `tasks.md` Example:
 ```markdown
 ## 8. Validation
 - [] Dogfood: run the full gauntlet via `.claude/commands/dogfood.md` steps and fix all issues
 ```
-**Do not** incluclude linting, tests, build, etc in the validation; the gauntlet suite runs all of this.
+**Do not** include linting, tests, build, etc in the validation; the gauntlet suite runs all of this.
 
 5. **Create design.md when needed:**
 Create `design.md` if any of the following apply; otherwise omit it:
