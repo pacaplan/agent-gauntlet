@@ -17,15 +17,16 @@ const TEST_DIR = path.join(process.cwd(), `test-stop-hook-${Date.now()}`);
 // Store mocks
 let spawnMock: ReturnType<typeof mock>;
 
-// Mock child_process.spawn
+// Mock child_process.spawn and exec
 mock.module("node:child_process", () => {
 	return {
 		spawn: (...args: unknown[]) => spawnMock?.(...args),
+		exec: mock(() => {}),
 	};
 });
 
 // Import after mocking
-const { registerStopHookCommand } = await import(
+const { registerStopHookCommand, getStopReasonInstructions, findLatestConsoleLog } = await import(
 	"../../src/commands/stop-hook.js"
 );
 
@@ -304,33 +305,89 @@ describe("Stop Hook Command", () => {
 	});
 
 	describe("Enhanced Stop Reason Instructions", () => {
-		it("should include trust level in stop reason", () => {
-			// The enhanced instructions include trust level guidance
-			const expectedTrustText = "Review trust level: medium";
-			expect(expectedTrustText).toContain("medium");
+		it("should include console log path when provided", () => {
+			const logPath = "/path/to/gauntlet_logs/console.5.log";
+			const instructions = getStopReasonInstructions(logPath);
+			expect(instructions).toContain(logPath);
+			expect(instructions).toContain("**Console log:**");
+			expect(instructions).toContain("Read this file for full execution output");
+		});
+
+		it("should not include console log section when path is null", () => {
+			const instructions = getStopReasonInstructions(null);
+			expect(instructions).not.toContain("**Console log:**");
+		});
+
+		it("should NOT include instruction to run agent-gauntlet run", () => {
+			const instructions = getStopReasonInstructions(null);
+			// The instruction to manually run agent-gauntlet should be removed
+			// because the stop hook auto-re-triggers
+			expect(instructions).not.toContain("Run `agent-gauntlet run` to verify");
+		});
+
+		it("should include urgent fix directive", () => {
+			const instructions = getStopReasonInstructions(null);
+			expect(instructions).toContain("GAUNTLET FAILED");
+			expect(instructions).toContain("YOU MUST FIX ISSUES NOW");
+			expect(instructions).toContain("cannot stop until the gauntlet passes");
+			expect(instructions).toContain("stop hook will automatically re-run");
+		});
+
+		it("should include trust level guidance", () => {
+			const instructions = getStopReasonInstructions(null);
+			expect(instructions).toContain("Review trust level: medium");
+			expect(instructions).toContain("Fix issues you reasonably agree with");
+			expect(instructions).toContain("Skip issues that are purely stylistic");
 		});
 
 		it("should include violation handling instructions", () => {
-			// Instructions should explain how to update status/result fields
-			const violationInstructions = [
-				'"status": "fixed"',
-				'"status": "skipped"',
-				'"result"',
-			];
-			// These patterns should be in the enhanced instructions
-			for (const instruction of violationInstructions) {
-				expect(instruction).toBeTruthy();
-			}
+			const instructions = getStopReasonInstructions(null);
+			expect(instructions).toContain('"status": "fixed"');
+			expect(instructions).toContain('"status": "skipped"');
+			expect(instructions).toContain('"result"');
+			expect(instructions).toContain("For REVIEW violations");
 		});
 
 		it("should include all termination conditions", () => {
-			const terminationConditions = [
-				"Status: Passed",
-				"Status: Passed with warnings",
-				"Status: Retry limit exceeded",
-			];
-			// All conditions should be documented
-			expect(terminationConditions.length).toBe(3);
+			const instructions = getStopReasonInstructions(null);
+			expect(instructions).toContain("Status: Passed");
+			expect(instructions).toContain("Status: Passed with warnings");
+			expect(instructions).toContain("Status: Retry limit exceeded");
+			expect(instructions).toContain("**Termination conditions:**");
+		});
+	});
+
+	describe("findLatestConsoleLog", () => {
+		it("should find the highest numbered console log file", async () => {
+			await fs.mkdir(path.join(TEST_DIR, "gauntlet_logs"), { recursive: true });
+			await fs.writeFile(path.join(TEST_DIR, "gauntlet_logs", "console.1.log"), "log1");
+			await fs.writeFile(path.join(TEST_DIR, "gauntlet_logs", "console.3.log"), "log3");
+			await fs.writeFile(path.join(TEST_DIR, "gauntlet_logs", "console.2.log"), "log2");
+
+			const latestLog = await findLatestConsoleLog(path.join(TEST_DIR, "gauntlet_logs"));
+			expect(latestLog).toBe(path.join(TEST_DIR, "gauntlet_logs", "console.3.log"));
+		});
+
+		it("should return null when no console logs exist", async () => {
+			await fs.mkdir(path.join(TEST_DIR, "gauntlet_logs"), { recursive: true });
+
+			const latestLog = await findLatestConsoleLog(path.join(TEST_DIR, "gauntlet_logs"));
+			expect(latestLog).toBeNull();
+		});
+
+		it("should return null when log directory does not exist", async () => {
+			const latestLog = await findLatestConsoleLog(path.join(TEST_DIR, "nonexistent"));
+			expect(latestLog).toBeNull();
+		});
+
+		it("should ignore non-console log files", async () => {
+			await fs.mkdir(path.join(TEST_DIR, "gauntlet_logs"), { recursive: true });
+			await fs.writeFile(path.join(TEST_DIR, "gauntlet_logs", "other.log"), "other");
+			await fs.writeFile(path.join(TEST_DIR, "gauntlet_logs", "console.1.log"), "log1");
+			await fs.writeFile(path.join(TEST_DIR, "gauntlet_logs", "console.txt"), "txt");
+
+			const latestLog = await findLatestConsoleLog(path.join(TEST_DIR, "gauntlet_logs"));
+			expect(latestLog).toBe(path.join(TEST_DIR, "gauntlet_logs", "console.1.log"));
 		});
 	});
 

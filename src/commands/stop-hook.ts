@@ -57,6 +57,36 @@ const STDIN_TIMEOUT_MS = 5000;
 const DEFAULT_LOG_DIR = "gauntlet_logs";
 
 /**
+ * Find the latest console.N.log file in the log directory.
+ * Returns the absolute path to the file, or null if none found.
+ */
+async function findLatestConsoleLog(logDir: string): Promise<string | null> {
+	try {
+		const files = await fs.readdir(logDir);
+		let maxNum = -1;
+		let latestFile: string | null = null;
+
+		for (const file of files) {
+			if (!file.startsWith("console.") || !file.endsWith(".log")) {
+				continue;
+			}
+			const middle = file.slice("console.".length, file.length - ".log".length);
+			if (/^\d+$/.test(middle)) {
+				const n = parseInt(middle, 10);
+				if (n > maxNum) {
+					maxNum = n;
+					latestFile = file;
+				}
+			}
+		}
+
+		return latestFile ? path.join(logDir, latestFile) : null;
+	} catch {
+		return null;
+	}
+}
+
+/**
  * Read stdin with a timeout. Reads until newline or timeout.
  * Returns empty string on timeout (allows stop).
  * Claude Code sends newline-terminated JSON, so we detect completion on newline.
@@ -243,10 +273,18 @@ function hasInfrastructureError(output: string): boolean {
 
 /**
  * Get the enhanced stop reason instructions for the agent.
- * Includes trust level guidance, violation handling, and termination conditions.
+ * Includes trust level guidance, violation handling, termination conditions,
+ * and path to the console log file for debugging.
  */
-function getStopReasonInstructions(): string {
-	return `Gauntlet gates did not pass.
+function getStopReasonInstructions(consoleLogPath: string | null): string {
+	const logPathSection = consoleLogPath
+		? `\n**Console log:** \`${consoleLogPath}\` — Read this file for full execution output and error details.`
+		: "";
+
+	return `**GAUNTLET FAILED — YOU MUST FIX ISSUES NOW**
+
+You cannot stop until the gauntlet passes or a termination condition is met. The stop hook will automatically re-run to verify your fixes.
+${logPathSection}
 
 **Review trust level: medium** — Fix issues you reasonably agree with or believe the human wants fixed. Skip issues that are purely stylistic, subjective, or that you believe the human would not want changed.
 
@@ -257,7 +295,6 @@ function getStopReasonInstructions(): string {
 4. For REVIEW violations: Update the \`"status"\` and \`"result"\` fields in the JSON file:
    - Set \`"status": "fixed"\` with a brief description in \`"result"\` for issues you fix.
    - Set \`"status": "skipped"\` with a brief reason in \`"result"\` for issues you skip.
-5. Run \`agent-gauntlet run\` to verify fixes.
 
 **Termination conditions:**
 - "Status: Passed" — All gates passed
@@ -313,6 +350,9 @@ async function shouldRunBasedOnInterval(
 
 	return elapsedMinutes >= intervalMinutes;
 }
+
+// Export for testing
+export { getStopReasonInstructions, findLatestConsoleLog };
 
 export function registerStopHookCommand(program: Command): void {
 	program
@@ -399,7 +439,8 @@ export function registerStopHookCommand(program: Command): void {
 
 				// 11. Block stop - gauntlet did not pass
 				verboseLog("Gauntlet failed, blocking stop");
-				outputHookResponse(false, getStopReasonInstructions());
+				const consoleLogPath = await findLatestConsoleLog(logDir);
+				outputHookResponse(false, getStopReasonInstructions(consoleLogPath));
 				process.exit(0);
 			} catch (error: unknown) {
 				// On any unexpected error, allow stop to avoid blocking indefinitely
