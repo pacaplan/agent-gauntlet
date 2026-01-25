@@ -30,24 +30,20 @@ describe("ReviewGateExecutor Logging", () => {
 
 		// Change to test directory with its own git repo to avoid issues with the main repo
 		process.chdir(TEST_DIR);
-		// Initialize a minimal git repo for the test
+		// Initialize a minimal git repo for the test - combine commands to reduce overhead
 		const { exec } = await import("node:child_process");
 		const { promisify } = await import("node:util");
 		const execAsync = promisify(exec);
-		await execAsync("git init");
-		await execAsync('git config user.email "test@test.com"');
-		await execAsync('git config user.name "Test"');
-		// Create an initial commit so we have a history
+
+		// Create initial file first
 		await fs.writeFile("test.txt", "initial");
-		await execAsync("git add test.txt");
-		await execAsync('git commit -m "initial"');
-		// Create a "main" branch
-		await execAsync("git branch -M main");
-		// Create src directory for our test
 		await fs.mkdir("src", { recursive: true });
 		await fs.writeFile("src/test.ts", "test content");
-		await execAsync("git add src/test.ts");
-		await execAsync('git commit -m "add src"');
+
+		// Combine git commands to reduce overhead
+		await execAsync(
+			'git init && git config user.email "test@test.com" && git config user.name "Test" && git add -A && git commit -m "initial" && git branch -M main',
+		);
 
 		// Make uncommitted changes so the diff isn't empty
 		await fs.writeFile("src/test.ts", "modified test content");

@@ -1,6 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, mock } from "bun:test";
+import { exec } from "node:child_process";
 import fs from "node:fs/promises";
 import path from "node:path";
+import { promisify } from "node:util";
 import {
 	createWorkingTreeRef,
 	deleteExecutionState,
@@ -14,7 +16,23 @@ import {
 	writeExecutionState,
 } from "../../src/utils/execution-state.js";
 
+const execAsync = promisify(exec);
 const TEST_DIR = path.join(import.meta.dir, "../../.test-execution-state");
+
+// Check if we're in a valid git repo with a proper branch (not detached HEAD)
+async function isValidGitRepo(): Promise<boolean> {
+	try {
+		const { stdout } = await execAsync("git rev-parse --is-inside-work-tree");
+		if (stdout.trim() !== "true") return false;
+		// Check if we have a branch (not detached HEAD)
+		const { stdout: branch } = await execAsync(
+			"git symbolic-ref --short HEAD 2>/dev/null || echo ''",
+		);
+		return branch.trim().length > 0;
+	} catch {
+		return false;
+	}
+}
 
 describe("Execution State Utilities", () => {
 	beforeEach(async () => {
@@ -118,6 +136,10 @@ describe("Execution State Utilities", () => {
 
 	describe("getCurrentBranch", () => {
 		it("returns current git branch name", async () => {
+			if (!(await isValidGitRepo())) {
+				console.log("Skipping: not in a valid git repo with branch");
+				return;
+			}
 			const branch = await getCurrentBranch();
 			expect(typeof branch).toBe("string");
 			expect(branch.length).toBeGreaterThan(0);
@@ -128,6 +150,10 @@ describe("Execution State Utilities", () => {
 
 	describe("getCurrentCommit", () => {
 		it("returns current HEAD commit SHA", async () => {
+			if (!(await isValidGitRepo())) {
+				console.log("Skipping: not in a valid git repo with branch");
+				return;
+			}
 			const commit = await getCurrentCommit();
 			expect(typeof commit).toBe("string");
 			// SHA should be 40 characters
@@ -137,6 +163,10 @@ describe("Execution State Utilities", () => {
 
 	describe("isCommitInBranch", () => {
 		it("returns true for commits in current branch", async () => {
+			if (!(await isValidGitRepo())) {
+				console.log("Skipping: not in a valid git repo with branch");
+				return;
+			}
 			// HEAD should always be in HEAD
 			const commit = await getCurrentCommit();
 			const result = await isCommitInBranch(commit, "HEAD");
@@ -144,6 +174,10 @@ describe("Execution State Utilities", () => {
 		});
 
 		it("returns false for non-existent commits", async () => {
+			if (!(await isValidGitRepo())) {
+				console.log("Skipping: not in a valid git repo with branch");
+				return;
+			}
 			const result = await isCommitInBranch("nonexistent123", "HEAD");
 			expect(result).toBe(false);
 		});
@@ -151,6 +185,10 @@ describe("Execution State Utilities", () => {
 
 	describe("createWorkingTreeRef", () => {
 		it("returns a valid git SHA", async () => {
+			if (!(await isValidGitRepo())) {
+				console.log("Skipping: not in a valid git repo with branch");
+				return;
+			}
 			const ref = await createWorkingTreeRef();
 			expect(typeof ref).toBe("string");
 			// Should be a 40-character hex SHA
@@ -158,6 +196,10 @@ describe("Execution State Utilities", () => {
 		});
 
 		it("returns HEAD SHA when working tree is clean", async () => {
+			if (!(await isValidGitRepo())) {
+				console.log("Skipping: not in a valid git repo with branch");
+				return;
+			}
 			// Note: In a clean working tree, createWorkingTreeRef falls back to HEAD
 			const ref = await createWorkingTreeRef();
 			const head = await getCurrentCommit();
@@ -168,12 +210,20 @@ describe("Execution State Utilities", () => {
 
 	describe("gitObjectExists", () => {
 		it("returns true for existing commit", async () => {
+			if (!(await isValidGitRepo())) {
+				console.log("Skipping: not in a valid git repo with branch");
+				return;
+			}
 			const commit = await getCurrentCommit();
 			const exists = await gitObjectExists(commit);
 			expect(exists).toBe(true);
 		});
 
 		it("returns false for non-existent SHA", async () => {
+			if (!(await isValidGitRepo())) {
+				console.log("Skipping: not in a valid git repo with branch");
+				return;
+			}
 			const exists = await gitObjectExists(
 				"0000000000000000000000000000000000000000",
 			);
@@ -181,6 +231,10 @@ describe("Execution State Utilities", () => {
 		});
 
 		it("returns false for invalid SHA format", async () => {
+			if (!(await isValidGitRepo())) {
+				console.log("Skipping: not in a valid git repo with branch");
+				return;
+			}
 			const exists = await gitObjectExists("not-a-valid-sha");
 			expect(exists).toBe(false);
 		});
@@ -216,6 +270,10 @@ describe("Execution State Utilities", () => {
 
 	describe("resolveFixBase", () => {
 		it("returns null when commit is merged into base branch", async () => {
+			if (!(await isValidGitRepo())) {
+				console.log("Skipping: not in a valid git repo with branch");
+				return;
+			}
 			// Use HEAD which is always in HEAD
 			const commit = await getCurrentCommit();
 			const state = {
@@ -231,6 +289,10 @@ describe("Execution State Utilities", () => {
 		});
 
 		it("returns working_tree_ref when valid and commit not merged", async () => {
+			if (!(await isValidGitRepo())) {
+				console.log("Skipping: not in a valid git repo with branch");
+				return;
+			}
 			const commit = await getCurrentCommit();
 			const workingTreeRef = await createWorkingTreeRef();
 			const state = {
@@ -250,6 +312,10 @@ describe("Execution State Utilities", () => {
 		});
 
 		it("falls back to commit when working_tree_ref is gc'd", async () => {
+			if (!(await isValidGitRepo())) {
+				console.log("Skipping: not in a valid git repo with branch");
+				return;
+			}
 			const commit = await getCurrentCommit();
 			const state = {
 				last_run_completed_at: new Date().toISOString(),
@@ -267,6 +333,10 @@ describe("Execution State Utilities", () => {
 		});
 
 		it("returns null when both refs are invalid", async () => {
+			if (!(await isValidGitRepo())) {
+				console.log("Skipping: not in a valid git repo with branch");
+				return;
+			}
 			const state = {
 				last_run_completed_at: new Date().toISOString(),
 				branch: "test-branch",
@@ -284,6 +354,10 @@ describe("Execution State Utilities", () => {
 
 	describe("writeExecutionState with working_tree_ref", () => {
 		it("includes working_tree_ref in state file", async () => {
+			if (!(await isValidGitRepo())) {
+				console.log("Skipping: not in a valid git repo with branch");
+				return;
+			}
 			await writeExecutionState(TEST_DIR);
 
 			const content = await fs.readFile(
