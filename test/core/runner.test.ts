@@ -1,9 +1,9 @@
 import { afterEach, describe, expect, it, mock } from "bun:test";
 import type { LoadedConfig } from "../../src/config/types";
-import type { ConsoleReporter } from "../../src/output/console";
-import type { Logger } from "../../src/output/logger";
 import type { Job } from "../../src/core/job";
 import { Runner } from "../../src/core/runner";
+import type { ConsoleReporter } from "../../src/output/console";
+import type { Logger } from "../../src/output/logger";
 
 // Mock dependencies
 const mockLogger = {

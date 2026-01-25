@@ -166,19 +166,28 @@ describe("cleanLogs", () => {
 		expect(exists).toBe(false);
 	});
 
-	it("moves .execution_state to previous/ during clean", async () => {
+	it("preserves .execution_state in root during clean", async () => {
 		// Create a log file and execution state
 		await fs.writeFile(path.join(TEST_DIR, "check.1.log"), "log content");
 		await fs.writeFile(
 			path.join(TEST_DIR, getExecutionStateFilename()),
-			JSON.stringify({ branch: "test", commit: "abc", last_run_completed_at: new Date().toISOString() }),
+			JSON.stringify({
+				branch: "test",
+				commit: "abc",
+				last_run_completed_at: new Date().toISOString(),
+			}),
 		);
 
 		await cleanLogs(TEST_DIR);
 
-		// Execution state should be in previous/
+		// Execution state should remain in root (not moved to previous/)
+		const rootFiles = await fs.readdir(TEST_DIR);
+		expect(rootFiles).toContain(getExecutionStateFilename());
+		expect(rootFiles).not.toContain("check.1.log");
+
+		// Logs should be in previous/
 		const previousFiles = await fs.readdir(path.join(TEST_DIR, "previous"));
-		expect(previousFiles).toContain(getExecutionStateFilename());
+		expect(previousFiles).not.toContain(getExecutionStateFilename());
 		expect(previousFiles).toContain("check.1.log");
 	});
 });
@@ -290,7 +299,7 @@ describe("auto-clean during rerun mode", () => {
 		let logsExist = await hasExistingLogs(TEST_DIR);
 		expect(logsExist).toBe(false); // No logs = fresh start
 
-		let autoClean = await shouldAutoClean(TEST_DIR, "origin/main");
+		const autoClean = await shouldAutoClean(TEST_DIR, "origin/main");
 		expect(autoClean.clean).toBe(true); // Would trigger auto-clean
 
 		// Scenario 2: After first run creates logs (rerun mode)

@@ -1,5 +1,6 @@
 import chalk from "chalk";
 import type { Command } from "commander";
+import { loadGlobalConfig } from "../config/global.js";
 import { loadConfig } from "../config/loader.js";
 import { ChangeDetector } from "../core/change-detector.js";
 import { EntryPointExpander } from "../core/entry-point.js";
@@ -8,17 +9,26 @@ import { Runner } from "../core/runner.js";
 import { ConsoleReporter } from "../output/console.js";
 import { startConsoleLog } from "../output/console-log.js";
 import { Logger } from "../output/logger.js";
-import { writeExecutionState } from "../utils/execution-state.js";
+import {
+	getDebugLogger,
+	initDebugLogger,
+	mergeDebugLogConfig,
+} from "../utils/debug-log.js";
+import {
+	readExecutionState,
+	resolveFixBase,
+	writeExecutionState,
+} from "../utils/execution-state.js";
 import {
 	findPreviousFailures,
 	type PassedSlot,
 	type PreviousViolation,
 } from "../utils/log-parser.js";
-import { readSessionRef, writeSessionRef } from "../utils/session-ref.js";
 import {
 	acquireLock,
 	cleanLogs,
 	hasExistingLogs,
+	performAutoClean,
 	releaseLock,
 	shouldAutoClean,
 } from "./shared.js";
@@ -44,6 +54,24 @@ export function registerRunCommand(program: Command): void {
 			try {
 				config = await loadConfig();
 
+				// Initialize debug logger
+				const globalConfig = await loadGlobalConfig();
+				const debugLogConfig = mergeDebugLogConfig(
+					config.project.debug_log,
+					globalConfig.debug_log,
+				);
+				initDebugLogger(config.project.log_dir, debugLogConfig);
+
+				// Log the command invocation
+				const debugLogger = getDebugLogger();
+				const args = [
+					options.baseBranch ? `-b ${options.baseBranch}` : "",
+					options.gate ? `-g ${options.gate}` : "",
+					options.commit ? `-c ${options.commit}` : "",
+					options.uncommitted ? "-u" : "",
+				].filter(Boolean);
+				await debugLogger?.logCommand("run", args);
+
 				// Determine effective base branch first (needed for auto-clean)
 				const effectiveBaseBranch =
 					options.baseBranch ||
@@ -67,7 +95,11 @@ export function registerRunCommand(program: Command): void {
 						console.log(
 							chalk.dim(`Auto-cleaning logs (${autoCleanResult.reason})...`),
 						);
-						await cleanLogs(config.project.log_dir);
+						await debugLogger?.logClean(
+							"auto",
+							autoCleanResult.reason || "unknown",
+						);
+						await performAutoClean(config.project.log_dir, autoCleanResult);
 					}
 				}
 
@@ -131,14 +163,38 @@ export function registerRunCommand(program: Command): void {
 					}
 
 					changeOptions = { uncommitted: true };
-					const fixBase = await readSessionRef(config.project.log_dir);
-					if (fixBase) {
-						changeOptions.fixBase = fixBase;
+					// Use working_tree_ref from execution state for rerun diff scoping
+					const executionState = await readExecutionState(
+						config.project.log_dir,
+					);
+					if (executionState?.working_tree_ref) {
+						changeOptions.fixBase = executionState.working_tree_ref;
 					}
-				} else if (options.commit || options.uncommitted) {
+				} else if (!logsExist) {
+					// Post-clean run: check if execution state has a working_tree_ref to use as fixBase
+					const executionState = await readExecutionState(
+						config.project.log_dir,
+					);
+					if (executionState) {
+						const resolved = await resolveFixBase(
+							executionState,
+							effectiveBaseBranch,
+						);
+						if (resolved.warning) {
+							console.log(chalk.yellow(`Warning: ${resolved.warning}`));
+						}
+						if (resolved.fixBase) {
+							changeOptions = { fixBase: resolved.fixBase };
+						}
+					}
+				}
+
+				// Allow explicit commit or uncommitted options to override fixBase
+				if (options.commit || options.uncommitted) {
 					changeOptions = {
 						commit: options.commit,
 						uncommitted: options.uncommitted,
+						fixBase: changeOptions?.fixBase,
 					};
 				}
 
@@ -185,6 +241,10 @@ export function registerRunCommand(program: Command): void {
 
 				console.log(chalk.dim(`Running ${jobs.length} gates...`));
 
+				// Log run start
+				const runMode = isRerun ? "verification" : "full";
+				await debugLogger?.logRunStart(runMode, changes.length, jobs.length);
+
 				const logger = new Logger(config.project.log_dir);
 				const reporter = new ConsoleReporter();
 				const runner = new Runner(
@@ -195,18 +255,28 @@ export function registerRunCommand(program: Command): void {
 					changeOptions,
 					effectiveBaseBranch,
 					passedSlotsMap,
+					debugLogger ?? undefined,
 				);
 
 				const success = await runner.run(jobs);
 
-				if (success) {
-					await cleanLogs(config.project.log_dir);
-				} else {
-					await writeSessionRef(config.project.log_dir);
-				}
+				// Log run end
+				await debugLogger?.logRunEnd(
+					success ? "pass" : "fail",
+					0,
+					0,
+					0,
+					logger.getRunNumber(),
+				);
 
 				// Write execution state before releasing lock (for interval checks)
+				// This now captures working_tree_ref which is used for rerun diff scoping
 				await writeExecutionState(config.project.log_dir);
+
+				if (success) {
+					await debugLogger?.logClean("auto", "all_passed");
+					await cleanLogs(config.project.log_dir);
+				}
 				await releaseLock(config.project.log_dir);
 				restoreConsole?.();
 				process.exit(success ? 0 : 1);

@@ -292,6 +292,20 @@ Controls scheduling mode:
 - `true`: gates with `parallel: true` run concurrently; `parallel: false` run sequentially (but concurrently with the parallel batch)
 - `false`: all gates run sequentially
 
+### `max_retries` (number, default: `3`)
+
+Maximum number of retry attempts. After the initial run, the system allows up to this many additional runs.
+
+### `rerun_new_issue_threshold` (number, default: `3`)
+
+Maximum new issues allowed in a rerun before failing.
+
+### `debug_log` (object, optional)
+
+Configuration for persistent debug logging:
+- `enabled` (boolean, default: `false`): Whether to enable debug logging
+- `max_size_mb` (number, default: `10`): Maximum log file size before rotation
+
 ### `entry_points` (array, required)
 
 Each entry point:
@@ -371,6 +385,24 @@ Each job writes a log file under `log_dir` (default: `gauntlet_logs/`), includin
 - full stdout/stderr (checks)
 - review output per tool (reviews)
 - final pass/fail/error decision
+
+### Debug logging
+
+When `debug_log.enabled` is `true`, Agent Gauntlet writes detailed execution logs to `.debug.log` in the log directory. This includes:
+- Command invocations with arguments
+- Run start/end events with timing
+- Gate results (pass/fail/error)
+- Clean operations (manual/auto with reason)
+- Stop hook decisions
+
+The debug log survives `clean` operations and rotates when it exceeds `max_size_mb`.
+
+### Persistent files
+
+The following files in the log directory survive `clean` operations:
+- `.execution_state` - Tracks branch, commit, and working tree state
+- `.debug.log` - Debug log (when enabled)
+- `.debug.log.1` - Rotated debug log
 
 ## Troubleshooting
 

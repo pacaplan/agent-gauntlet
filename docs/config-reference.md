@@ -26,8 +26,18 @@ This document lists the configuration files Agent Gauntlet loads and all support
     Default ordered list of review CLI tools to try when a review gate doesn't specify its own `cli_preference`.
   - **check_usage_limit**: boolean (default: `false`)  
     If `true`, health checks will probe for usage limits/quotas (which may consume a small amount of tokens).
-- **allow_parallel**: boolean (default: `true`)  
+- **allow_parallel**: boolean (default: `true`)
   If `true`, gates with `parallel: true` run concurrently, while `parallel: false` gates run sequentially. If `false`, all gates run sequentially regardless of per-gate settings.
+- **max_retries**: number (default: `3`)
+  Maximum number of retry attempts before declaring "Retry limit exceeded". After the initial run, the system allows up to this many additional runs to fix issues.
+- **rerun_new_issue_threshold**: number (default: `3`)
+  Maximum number of new issues allowed in a rerun before failing the gate. If a rerun introduces more than this many new issues, it fails even if original issues were fixed.
+- **debug_log**: object (optional)
+  Configuration for persistent debug logging. When enabled, writes detailed execution logs to `.debug.log` in the log directory. This file survives `clean` operations.
+  - **enabled**: boolean (default: `false`)
+    Whether to enable debug logging.
+  - **max_size_mb**: number (default: `10`)
+    Maximum size of the debug log file in megabytes. When exceeded, the current log is rotated to `.debug.log.1` and a new log is started.
 - **entry_points**: array (required)  
   Declares which parts of the repo are “scopes” for change detection and which gates run for each scope. Only entry points with detected changes will produce jobs.
   - **path**: string (required)  
@@ -50,6 +60,9 @@ cli:
     - claude
     - github-copilot
   check_usage_limit: false
+debug_log:
+  enabled: true
+  max_size_mb: 10
 
 entry_points:
   - path: "."

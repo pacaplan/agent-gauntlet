@@ -26,9 +26,11 @@ mock.module("node:child_process", () => {
 });
 
 // Import after mocking
-const { registerStopHookCommand, getStopReasonInstructions, findLatestConsoleLog } = await import(
-	"../../src/commands/stop-hook.js"
-);
+const {
+	registerStopHookCommand,
+	getStopReasonInstructions,
+	findLatestConsoleLog,
+} = await import("../../src/commands/stop-hook.js");
 
 describe("Stop Hook Command", () => {
 	let program: Command;
@@ -310,7 +312,9 @@ describe("Stop Hook Command", () => {
 			const instructions = getStopReasonInstructions(logPath);
 			expect(instructions).toContain(logPath);
 			expect(instructions).toContain("**Console log:**");
-			expect(instructions).toContain("Read this file for full execution output");
+			expect(instructions).toContain(
+				"Read this file for full execution output",
+			);
 		});
 
 		it("should not include console log section when path is null", () => {
@@ -360,34 +364,64 @@ describe("Stop Hook Command", () => {
 	describe("findLatestConsoleLog", () => {
 		it("should find the highest numbered console log file", async () => {
 			await fs.mkdir(path.join(TEST_DIR, "gauntlet_logs"), { recursive: true });
-			await fs.writeFile(path.join(TEST_DIR, "gauntlet_logs", "console.1.log"), "log1");
-			await fs.writeFile(path.join(TEST_DIR, "gauntlet_logs", "console.3.log"), "log3");
-			await fs.writeFile(path.join(TEST_DIR, "gauntlet_logs", "console.2.log"), "log2");
+			await fs.writeFile(
+				path.join(TEST_DIR, "gauntlet_logs", "console.1.log"),
+				"log1",
+			);
+			await fs.writeFile(
+				path.join(TEST_DIR, "gauntlet_logs", "console.3.log"),
+				"log3",
+			);
+			await fs.writeFile(
+				path.join(TEST_DIR, "gauntlet_logs", "console.2.log"),
+				"log2",
+			);
 
-			const latestLog = await findLatestConsoleLog(path.join(TEST_DIR, "gauntlet_logs"));
-			expect(latestLog).toBe(path.join(TEST_DIR, "gauntlet_logs", "console.3.log"));
+			const latestLog = await findLatestConsoleLog(
+				path.join(TEST_DIR, "gauntlet_logs"),
+			);
+			expect(latestLog).toBe(
+				path.join(TEST_DIR, "gauntlet_logs", "console.3.log"),
+			);
 		});
 
 		it("should return null when no console logs exist", async () => {
 			await fs.mkdir(path.join(TEST_DIR, "gauntlet_logs"), { recursive: true });
 
-			const latestLog = await findLatestConsoleLog(path.join(TEST_DIR, "gauntlet_logs"));
+			const latestLog = await findLatestConsoleLog(
+				path.join(TEST_DIR, "gauntlet_logs"),
+			);
 			expect(latestLog).toBeNull();
 		});
 
 		it("should return null when log directory does not exist", async () => {
-			const latestLog = await findLatestConsoleLog(path.join(TEST_DIR, "nonexistent"));
+			const latestLog = await findLatestConsoleLog(
+				path.join(TEST_DIR, "nonexistent"),
+			);
 			expect(latestLog).toBeNull();
 		});
 
 		it("should ignore non-console log files", async () => {
 			await fs.mkdir(path.join(TEST_DIR, "gauntlet_logs"), { recursive: true });
-			await fs.writeFile(path.join(TEST_DIR, "gauntlet_logs", "other.log"), "other");
-			await fs.writeFile(path.join(TEST_DIR, "gauntlet_logs", "console.1.log"), "log1");
-			await fs.writeFile(path.join(TEST_DIR, "gauntlet_logs", "console.txt"), "txt");
+			await fs.writeFile(
+				path.join(TEST_DIR, "gauntlet_logs", "other.log"),
+				"other",
+			);
+			await fs.writeFile(
+				path.join(TEST_DIR, "gauntlet_logs", "console.1.log"),
+				"log1",
+			);
+			await fs.writeFile(
+				path.join(TEST_DIR, "gauntlet_logs", "console.txt"),
+				"txt",
+			);
 
-			const latestLog = await findLatestConsoleLog(path.join(TEST_DIR, "gauntlet_logs"));
-			expect(latestLog).toBe(path.join(TEST_DIR, "gauntlet_logs", "console.1.log"));
+			const latestLog = await findLatestConsoleLog(
+				path.join(TEST_DIR, "gauntlet_logs"),
+			);
+			expect(latestLog).toBe(
+				path.join(TEST_DIR, "gauntlet_logs", "console.1.log"),
+			);
 		});
 	});
 
@@ -486,7 +520,10 @@ describe("Stop Hook Command", () => {
 		it("should run when no execution state exists", async () => {
 			// Clean up any leftover gauntlet_logs from previous tests
 			await fs
-				.rm(path.join(TEST_DIR, "gauntlet_logs"), { recursive: true, force: true })
+				.rm(path.join(TEST_DIR, "gauntlet_logs"), {
+					recursive: true,
+					force: true,
+				})
 				.catch(() => {});
 
 			// Create gauntlet config without execution state

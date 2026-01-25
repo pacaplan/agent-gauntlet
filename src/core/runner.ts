@@ -15,6 +15,7 @@ import type { GateResult } from "../gates/result.js";
 import { ReviewGateExecutor } from "../gates/review.js";
 import type { ConsoleReporter } from "../output/console.js";
 import type { Logger } from "../output/logger.js";
+import type { DebugLogger } from "../utils/debug-log.js";
 import type { PreviousViolation } from "../utils/log-parser.js";
 import { sanitizeJobId } from "../utils/sanitizer.js";
 import type { Job } from "./job.js";
@@ -38,6 +39,7 @@ export class Runner {
 			string,
 			Map<number, { adapter: string; passIteration: number }>
 		>,
+		private debugLogger?: DebugLogger,
 	) {}
 
 	async run(jobs: Job[]): Promise<boolean> {
@@ -151,6 +153,14 @@ export class Runner {
 
 		this.results.push(result);
 		this.reporter.onJobComplete(job, result);
+
+		// Log gate result
+		await this.debugLogger?.logGateResult(
+			job.id,
+			result.status,
+			result.duration,
+			result.errorCount,
+		);
 
 		// Handle Fail Fast (only for checks, and only when parallel is false)
 		if (

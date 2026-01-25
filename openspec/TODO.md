@@ -6,6 +6,7 @@ update task generation validation criteria to say to look for agent-gauntlet and
 
 enhance logger
 - diff stats - number of files, total size of diff (lines added and removed?)
+- include branch on every message
 
 
 ------------------------------------------------------------

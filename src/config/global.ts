@@ -11,12 +11,20 @@ const GLOBAL_CONFIG_PATH = path.join(
 	"config.yml",
 );
 
+export const debugLogConfigSchema = z.object({
+	enabled: z.boolean().default(false),
+	max_size_mb: z.number().default(10),
+});
+
+export type DebugLogConfig = z.infer<typeof debugLogConfigSchema>;
+
 const globalConfigSchema = z.object({
 	stop_hook: z
 		.object({
 			run_interval_minutes: z.number().default(10),
 		})
 		.default({ run_interval_minutes: 10 }),
+	debug_log: debugLogConfigSchema.default({ enabled: false, max_size_mb: 10 }),
 });
 
 export type GlobalConfig = z.infer<typeof globalConfigSchema>;
@@ -24,6 +32,10 @@ export type GlobalConfig = z.infer<typeof globalConfigSchema>;
 export const DEFAULT_GLOBAL_CONFIG: GlobalConfig = {
 	stop_hook: {
 		run_interval_minutes: 10,
+	},
+	debug_log: {
+		enabled: false,
+		max_size_mb: 10,
 	},
 };
 

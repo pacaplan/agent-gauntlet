@@ -10,9 +10,7 @@ describe("Global Configuration", () => {
 	describe("Schema Validation", () => {
 		it("should accept valid configuration", async () => {
 			// Import the module fresh to test schema
-			const { loadGlobalConfig } = await import(
-				"../../src/config/global.js"
-			);
+			const { loadGlobalConfig } = await import("../../src/config/global.js");
 			// loadGlobalConfig reads from user's actual global config if it exists
 			// We just verify the structure is valid, not the specific default value
 			const config = await loadGlobalConfig();

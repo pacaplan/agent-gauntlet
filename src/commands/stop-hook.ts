@@ -4,6 +4,7 @@ import path from "node:path";
 import type { Command } from "commander";
 import YAML from "yaml";
 import { loadGlobalConfig } from "../config/global.js";
+import { DebugLogger, mergeDebugLogConfig } from "../utils/debug-log.js";
 import { readExecutionState } from "../utils/execution-state.js";
 import { getLockFilename } from "./shared.js";
 
@@ -24,6 +25,10 @@ interface HookResponse {
 
 interface MinimalConfig {
 	log_dir?: string;
+	debug_log?: {
+		enabled?: boolean;
+		max_size_mb?: number;
+	};
 }
 
 /**
@@ -180,6 +185,22 @@ async function getLogDir(projectCwd: string): Promise<string> {
 		return config.log_dir || DEFAULT_LOG_DIR;
 	} catch {
 		return DEFAULT_LOG_DIR;
+	}
+}
+
+/**
+ * Read the debug_log config from project config without full validation.
+ */
+async function getDebugLogConfig(
+	projectCwd: string,
+): Promise<MinimalConfig["debug_log"]> {
+	try {
+		const configPath = path.join(projectCwd, ".gauntlet", "config.yml");
+		const content = await fs.readFile(configPath, "utf-8");
+		const config = YAML.parse(content) as MinimalConfig;
+		return config.debug_log;
+	} catch {
+		return undefined;
 	}
 }
 
@@ -364,7 +385,7 @@ async function shouldRunBasedOnInterval(
 
 	const lastRun = new Date(state.last_run_completed_at);
 	// Handle invalid date (corrupted state) - treat as needing to run
-	if (isNaN(lastRun.getTime())) {
+	if (Number.isNaN(lastRun.getTime())) {
 		return true;
 	}
 
@@ -382,6 +403,7 @@ export function registerStopHookCommand(program: Command): void {
 		.command("stop-hook")
 		.description("Claude Code stop hook - validates gauntlet completion")
 		.action(async () => {
+			let debugLogger: DebugLogger | null = null;
 			try {
 				verboseLog("Starting gauntlet validation...");
 
@@ -419,12 +441,23 @@ export function registerStopHookCommand(program: Command): void {
 				// 5. Get log directory from project config
 				const logDir = path.join(projectCwd, await getLogDir(projectCwd));
 
+				// Initialize debug logger for stop-hook
+				const globalConfig = await loadGlobalConfig();
+				const projectDebugLogConfig = await getDebugLogConfig(projectCwd);
+				const debugLogConfig = mergeDebugLogConfig(
+					projectDebugLogConfig,
+					globalConfig.debug_log,
+				);
+				debugLogger = new DebugLogger(logDir, debugLogConfig);
+				await debugLogger.logCommand("stop-hook", []);
+
 				// 6. Lock pre-check: If lock file exists, another gauntlet is running
 				const lockPath = path.join(logDir, getLockFilename());
 				if (await fileExists(lockPath)) {
 					verboseLog(
 						"Gauntlet already running (lock file exists), allowing stop",
 					);
+					await debugLogger.logStopHook("allow", "lock_exists");
 					process.exit(0);
 				}
 
@@ -433,13 +466,13 @@ export function registerStopHookCommand(program: Command): void {
 
 				// 8. Load global config and check run interval (only if no existing logs)
 				if (!hasLogs) {
-					const globalConfig = await loadGlobalConfig();
 					const intervalMinutes = globalConfig.stop_hook.run_interval_minutes;
 
 					if (!(await shouldRunBasedOnInterval(logDir, intervalMinutes))) {
 						verboseLog(
 							`Run interval (${intervalMinutes} min) not elapsed, allowing stop`,
 						);
+						await debugLogger.logStopHook("allow", "interval_not_elapsed");
 						process.exit(0);
 					}
 				} else {
@@ -453,22 +486,26 @@ export function registerStopHookCommand(program: Command): void {
 				// 10. Check termination conditions
 				if (result.success) {
 					verboseLog("Gauntlet passed!");
+					await debugLogger.logStopHook("allow", "passed");
 					process.exit(0);
 				}
 
 				if (hasTerminationCondition(result.output)) {
 					verboseLog("Termination condition met, allowing stop");
+					await debugLogger.logStopHook("allow", "termination_condition");
 					process.exit(0);
 				}
 
 				// 11. Check for infrastructure errors (allow stop)
 				if (hasInfrastructureError(result.output)) {
 					verboseLog("Infrastructure error detected, allowing stop");
+					await debugLogger.logStopHook("allow", "infrastructure_error");
 					process.exit(0);
 				}
 
 				// 12. Block stop - gauntlet did not pass
 				verboseLog("Gauntlet failed, blocking stop");
+				await debugLogger.logStopHook("block", "failed");
 				const consoleLogPath = await findLatestConsoleLog(logDir);
 				outputHookResponse(true, getStopReasonInstructions(consoleLogPath));
 				process.exit(0); // Exit 0 so Claude Code processes the JSON (decision: "block" blocks)
@@ -476,6 +513,7 @@ export function registerStopHookCommand(program: Command): void {
 				// On any unexpected error, allow stop to avoid blocking indefinitely
 				const err = error as { message?: string };
 				console.error(`Stop hook error: ${err.message}`);
+				await debugLogger?.logStopHook("allow", `error: ${err.message}`);
 				process.exit(0);
 			}
 		});

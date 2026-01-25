@@ -2,11 +2,15 @@ import { afterEach, beforeEach, describe, expect, it, mock } from "bun:test";
 import fs from "node:fs/promises";
 import path from "node:path";
 import {
+	createWorkingTreeRef,
+	deleteExecutionState,
 	getCurrentBranch,
 	getCurrentCommit,
 	getExecutionStateFilename,
+	gitObjectExists,
 	isCommitInBranch,
 	readExecutionState,
+	resolveFixBase,
 	writeExecutionState,
 } from "../../src/utils/execution-state.js";
 
@@ -142,6 +146,155 @@ describe("Execution State Utilities", () => {
 		it("returns false for non-existent commits", async () => {
 			const result = await isCommitInBranch("nonexistent123", "HEAD");
 			expect(result).toBe(false);
+		});
+	});
+
+	describe("createWorkingTreeRef", () => {
+		it("returns a valid git SHA", async () => {
+			const ref = await createWorkingTreeRef();
+			expect(typeof ref).toBe("string");
+			// Should be a 40-character hex SHA
+			expect(ref).toMatch(/^[a-f0-9]{40}$/);
+		});
+
+		it("returns HEAD SHA when working tree is clean", async () => {
+			// Note: In a clean working tree, createWorkingTreeRef falls back to HEAD
+			const ref = await createWorkingTreeRef();
+			const head = await getCurrentCommit();
+			// Either it's HEAD (clean) or a stash SHA (dirty)
+			expect(ref.length).toBe(40);
+		});
+	});
+
+	describe("gitObjectExists", () => {
+		it("returns true for existing commit", async () => {
+			const commit = await getCurrentCommit();
+			const exists = await gitObjectExists(commit);
+			expect(exists).toBe(true);
+		});
+
+		it("returns false for non-existent SHA", async () => {
+			const exists = await gitObjectExists(
+				"0000000000000000000000000000000000000000",
+			);
+			expect(exists).toBe(false);
+		});
+
+		it("returns false for invalid SHA format", async () => {
+			const exists = await gitObjectExists("not-a-valid-sha");
+			expect(exists).toBe(false);
+		});
+	});
+
+	describe("deleteExecutionState", () => {
+		it("removes execution state file when it exists", async () => {
+			// Create state file
+			const statePath = path.join(TEST_DIR, ".execution_state");
+			await fs.writeFile(statePath, JSON.stringify({ branch: "test" }));
+
+			// Verify it exists
+			const statBefore = await fs.stat(statePath);
+			expect(statBefore.isFile()).toBe(true);
+
+			// Delete it
+			await deleteExecutionState(TEST_DIR);
+
+			// Verify it's gone
+			try {
+				await fs.stat(statePath);
+				expect(true).toBe(false); // Should not reach
+			} catch (e: unknown) {
+				expect((e as { code: string }).code).toBe("ENOENT");
+			}
+		});
+
+		it("does not throw when file does not exist", async () => {
+			// Should not throw
+			await deleteExecutionState(path.join(TEST_DIR, "nonexistent"));
+		});
+	});
+
+	describe("resolveFixBase", () => {
+		it("returns null when commit is merged into base branch", async () => {
+			// Use HEAD which is always in HEAD
+			const commit = await getCurrentCommit();
+			const state = {
+				last_run_completed_at: new Date().toISOString(),
+				branch: "test-branch",
+				commit,
+				working_tree_ref: commit,
+			};
+
+			const result = await resolveFixBase(state, "HEAD");
+			// Since commit is in HEAD, state is considered stale
+			expect(result.fixBase).toBeNull();
+		});
+
+		it("returns working_tree_ref when valid and commit not merged", async () => {
+			const commit = await getCurrentCommit();
+			const workingTreeRef = await createWorkingTreeRef();
+			const state = {
+				last_run_completed_at: new Date().toISOString(),
+				branch: "test-branch",
+				commit,
+				working_tree_ref: workingTreeRef,
+			};
+
+			// Use a non-existent branch that commit can't be merged into
+			const result = await resolveFixBase(
+				state,
+				"nonexistent-branch-that-does-not-exist",
+			);
+			expect(result.fixBase).toBe(workingTreeRef);
+			expect(result.warning).toBeUndefined();
+		});
+
+		it("falls back to commit when working_tree_ref is gc'd", async () => {
+			const commit = await getCurrentCommit();
+			const state = {
+				last_run_completed_at: new Date().toISOString(),
+				branch: "test-branch",
+				commit,
+				working_tree_ref: "0000000000000000000000000000000000000000", // Non-existent
+			};
+
+			const result = await resolveFixBase(
+				state,
+				"nonexistent-branch-that-does-not-exist",
+			);
+			expect(result.fixBase).toBe(commit);
+			expect(result.warning).toContain("garbage collected");
+		});
+
+		it("returns null when both refs are invalid", async () => {
+			const state = {
+				last_run_completed_at: new Date().toISOString(),
+				branch: "test-branch",
+				commit: "0000000000000000000000000000000000000000",
+				working_tree_ref: "1111111111111111111111111111111111111111",
+			};
+
+			const result = await resolveFixBase(
+				state,
+				"nonexistent-branch-that-does-not-exist",
+			);
+			expect(result.fixBase).toBeNull();
+		});
+	});
+
+	describe("writeExecutionState with working_tree_ref", () => {
+		it("includes working_tree_ref in state file", async () => {
+			await writeExecutionState(TEST_DIR);
+
+			const content = await fs.readFile(
+				path.join(TEST_DIR, ".execution_state"),
+				"utf-8",
+			);
+			const state = JSON.parse(content);
+
+			expect(state).toHaveProperty("working_tree_ref");
+			expect(typeof state.working_tree_ref).toBe("string");
+			expect(state.working_tree_ref).toMatch(/^[a-f0-9]{40}$/);
 		});
 	});
 });

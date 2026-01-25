@@ -41,7 +41,9 @@ describe("Skip Passed Reviews", () => {
 			expect(result.failures).toEqual([]);
 			expect(result.passedSlots.size).toBe(1);
 			// jobId is "review_src_code-quality" (adapter is stripped)
-			const passedSlot = result.passedSlots.get("review_src_code-quality")?.get(1);
+			const passedSlot = result.passedSlots
+				.get("review_src_code-quality")
+				?.get(1);
 			expect(passedSlot?.passIteration).toBe(2);
 			expect(passedSlot?.adapter).toBe("claude");
 		});
@@ -254,7 +256,9 @@ describe("Skip Passed Reviews", () => {
 			)) as PreviousFailuresResult;
 
 			// code-quality passed
-			const passedSlot = result.passedSlots.get("review_src_code-quality")?.get(1);
+			const passedSlot = result.passedSlots
+				.get("review_src_code-quality")
+				?.get(1);
 			expect(passedSlot?.passIteration).toBe(1);
 			expect(passedSlot?.adapter).toBe("claude");
 
@@ -342,7 +346,9 @@ describe("Skip Passed Reviews", () => {
 			expect(result.failures.length).toBe(1);
 
 			// Slot 2 has no passed entry (no log file = must run)
-			expect(result.passedSlots.get("review_src_quality")?.get(2)).toBeUndefined();
+			expect(
+				result.passedSlots.get("review_src_quality")?.get(2),
+			).toBeUndefined();
 		});
 
 		it("Scenario 12: skipped slot JSON has skipped_prior_pass status", async () => {

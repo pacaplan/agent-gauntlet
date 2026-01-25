@@ -6,8 +6,8 @@ import type {
 	ReviewGateConfig,
 	ReviewPromptFrontmatter,
 } from "../../src/config/types.js";
-import { Logger } from "../../src/output/logger.js";
 import type { ReviewGateExecutor } from "../../src/gates/review.js";
+import { Logger } from "../../src/output/logger.js";
 
 const TEST_DIR = path.join(process.cwd(), `test-review-logs-${Date.now()}`);
 
@@ -157,13 +157,17 @@ describe("ReviewGateExecutor Logging", () => {
 		}
 
 		// With round-robin dispatch, log files use @<index> pattern
-		if (!result.logPaths[0]?.includes("review_src_code-quality_codex@1.1.log")) {
+		if (
+			!result.logPaths[0]?.includes("review_src_code-quality_codex@1.1.log")
+		) {
 			throw new Error(
 				`Expected result.logPaths[0] to contain "review_src_code-quality_codex@1.1.log" but got "${result.logPaths[0]}"`,
 			);
 		}
 
-		if (!result.logPaths[1]?.includes("review_src_code-quality_claude@2.1.log")) {
+		if (
+			!result.logPaths[1]?.includes("review_src_code-quality_claude@2.1.log")
+		) {
 			throw new Error(
 				`Expected result.logPaths[1] to contain "review_src_code-quality_claude@2.1.log" but got "${result.logPaths[1]}"`,
 			);
