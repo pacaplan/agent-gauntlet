@@ -50,7 +50,10 @@ export async function hasExistingLogs(logDir: string): Promise<boolean> {
 	try {
 		const entries = await fs.readdir(logDir);
 		return entries.some(
-			(f) => (f.endsWith(".log") || f.endsWith(".json")) && f !== "previous",
+			(f) =>
+				(f.endsWith(".log") || f.endsWith(".json")) &&
+				f !== "previous" &&
+				!f.startsWith("console."),
 		);
 	} catch {
 		return false;
@@ -77,11 +80,11 @@ export async function cleanLogs(logDir: string): Promise<void> {
 			await fs.mkdir(previousDir, { recursive: true });
 		}
 
-		// 2. Move all .log and .json files from logDir root into previous/
+		// 2. Move all files from logDir root into previous/ (except previous/ and lock file)
 		const files = await fs.readdir(logDir);
 		await Promise.all(
 			files
-				.filter((file) => file.endsWith(".log") || file.endsWith(".json"))
+				.filter((file) => file !== "previous" && file !== LOCK_FILENAME)
 				.map((file) =>
 					fs.rename(path.join(logDir, file), path.join(previousDir, file)),
 				),
