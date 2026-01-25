@@ -8,6 +8,7 @@ import { Runner } from "../core/runner.js";
 import { ConsoleReporter } from "../output/console.js";
 import { startConsoleLog } from "../output/console-log.js";
 import { Logger } from "../output/logger.js";
+import { writeExecutionState } from "../utils/execution-state.js";
 import {
 	findPreviousFailures,
 	type PassedSlot,
@@ -19,6 +20,7 @@ import {
 	cleanLogs,
 	hasExistingLogs,
 	releaseLock,
+	shouldAutoClean,
 } from "./shared.js";
 
 export function registerRunCommand(program: Command): void {
@@ -41,11 +43,8 @@ export function registerRunCommand(program: Command): void {
 			let restoreConsole: (() => void) | undefined;
 			try {
 				config = await loadConfig();
-				restoreConsole = await startConsoleLog(config.project.log_dir);
-				await acquireLock(config.project.log_dir);
-				lockAcquired = true;
 
-				// Determine effective base branch
+				// Determine effective base branch first (needed for auto-clean)
 				const effectiveBaseBranch =
 					options.baseBranch ||
 					(process.env.GITHUB_BASE_REF &&
@@ -54,9 +53,28 @@ export function registerRunCommand(program: Command): void {
 						: null) ||
 					config.project.base_branch;
 
-				// Detect rerun mode: if logs exist and not targeting a specific commit, enter verification mode
+				// Detect rerun mode early: if logs exist, skip auto-clean
 				const logsExist = await hasExistingLogs(config.project.log_dir);
 				const isRerun = logsExist && !options.commit;
+
+				// Only auto-clean on first run, not during rerun/verification mode
+				if (!logsExist) {
+					const autoCleanResult = await shouldAutoClean(
+						config.project.log_dir,
+						effectiveBaseBranch,
+					);
+					if (autoCleanResult.clean) {
+						console.log(
+							chalk.dim(`Auto-cleaning logs (${autoCleanResult.reason})...`),
+						);
+						await cleanLogs(config.project.log_dir);
+					}
+				}
+
+				// Acquire lock BEFORE starting console log (prevents orphaned log files)
+				await acquireLock(config.project.log_dir);
+				lockAcquired = true;
+				restoreConsole = await startConsoleLog(config.project.log_dir);
 
 				let failuresMap:
 					| Map<string, Map<string, PreviousViolation[]>>
@@ -139,6 +157,7 @@ export function registerRunCommand(program: Command): void {
 
 				if (changes.length === 0) {
 					console.log(chalk.green("No changes detected."));
+					await writeExecutionState(config.project.log_dir);
 					await releaseLock(config.project.log_dir);
 					restoreConsole?.();
 					process.exit(0);
@@ -158,6 +177,7 @@ export function registerRunCommand(program: Command): void {
 
 				if (jobs.length === 0) {
 					console.log(chalk.yellow("No applicable gates for these changes."));
+					await writeExecutionState(config.project.log_dir);
 					await releaseLock(config.project.log_dir);
 					restoreConsole?.();
 					process.exit(0);
@@ -185,11 +205,19 @@ export function registerRunCommand(program: Command): void {
 					await writeSessionRef(config.project.log_dir);
 				}
 
+				// Write execution state before releasing lock
+				await writeExecutionState(config.project.log_dir);
 				await releaseLock(config.project.log_dir);
 				restoreConsole?.();
 				process.exit(success ? 0 : 1);
 			} catch (error: unknown) {
+				// Write execution state even on error (if lock was acquired)
 				if (config && lockAcquired) {
+					try {
+						await writeExecutionState(config.project.log_dir);
+					} catch {
+						// Ignore errors writing state during error handling
+					}
 					await releaseLock(config.project.log_dir);
 				}
 				const err = error as { message?: string };

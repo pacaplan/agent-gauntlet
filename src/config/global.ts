@@ -1,0 +1,64 @@
+import fs from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
+import YAML from "yaml";
+import { z } from "zod";
+
+const GLOBAL_CONFIG_PATH = path.join(
+	os.homedir(),
+	".config",
+	"agent-gauntlet",
+	"config.yml",
+);
+
+const globalConfigSchema = z.object({
+	stop_hook: z
+		.object({
+			run_interval_minutes: z.number().default(10),
+		})
+		.default({ run_interval_minutes: 10 }),
+});
+
+export type GlobalConfig = z.infer<typeof globalConfigSchema>;
+
+const DEFAULT_CONFIG: GlobalConfig = {
+	stop_hook: {
+		run_interval_minutes: 10,
+	},
+};
+
+/**
+ * Load the global agent-gauntlet configuration.
+ * Returns default values if the file doesn't exist or is invalid.
+ */
+export async function loadGlobalConfig(): Promise<GlobalConfig> {
+	try {
+		const content = await fs.readFile(GLOBAL_CONFIG_PATH, "utf-8");
+		const raw = YAML.parse(content);
+		return globalConfigSchema.parse(raw);
+	} catch (error) {
+		// Check if file doesn't exist (expected case)
+		if (
+			typeof error === "object" &&
+			error !== null &&
+			"code" in error &&
+			(error as { code: string }).code === "ENOENT"
+		) {
+			return DEFAULT_CONFIG;
+		}
+
+		// File exists but is invalid - log warning and use defaults
+		console.error(
+			`[gauntlet] Warning: Failed to parse global config at ${GLOBAL_CONFIG_PATH}, using defaults`,
+		);
+		return DEFAULT_CONFIG;
+	}
+}
+
+/**
+ * Get the path to the global config file.
+ * Useful for debugging or documentation.
+ */
+export function getGlobalConfigPath(): string {
+	return GLOBAL_CONFIG_PATH;
+}

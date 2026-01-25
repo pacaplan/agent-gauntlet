@@ -2,6 +2,10 @@ import { spawn } from "node:child_process";
 import fs from "node:fs/promises";
 import path from "node:path";
 import type { Command } from "commander";
+import YAML from "yaml";
+import { loadGlobalConfig } from "../config/global.js";
+import { readExecutionState } from "../utils/execution-state.js";
+import { getLockFilename } from "./shared.js";
 
 interface StopHookInput {
 	session_id?: string;
@@ -15,6 +19,10 @@ interface StopHookInput {
 interface HookResponse {
 	continue: boolean;
 	stopReason?: string;
+}
+
+interface MinimalConfig {
+	log_dir?: string;
 }
 
 /**
@@ -42,6 +50,11 @@ const INFRASTRUCTURE_ERRORS = [
  * Claude Code should send the JSON input quickly.
  */
 const STDIN_TIMEOUT_MS = 5000;
+
+/**
+ * Default log directory when config doesn't specify one.
+ */
+const DEFAULT_LOG_DIR = "gauntlet_logs";
 
 /**
  * Read stdin with a timeout. Reads until newline or timeout.
@@ -122,6 +135,20 @@ async function isLocalDev(cwd: string): Promise<boolean> {
 		return packageJson.name === "agent-gauntlet";
 	} catch {
 		return false;
+	}
+}
+
+/**
+ * Read the log_dir from project config without full validation.
+ */
+async function getLogDir(projectCwd: string): Promise<string> {
+	try {
+		const configPath = path.join(projectCwd, ".gauntlet", "config.yml");
+		const content = await fs.readFile(configPath, "utf-8");
+		const config = YAML.parse(content) as MinimalConfig;
+		return config.log_dir || DEFAULT_LOG_DIR;
+	} catch {
+		return DEFAULT_LOG_DIR;
 	}
 }
 
@@ -215,6 +242,30 @@ function hasInfrastructureError(output: string): boolean {
 }
 
 /**
+ * Get the enhanced stop reason instructions for the agent.
+ * Includes trust level guidance, violation handling, and termination conditions.
+ */
+function getStopReasonInstructions(): string {
+	return `Gauntlet gates did not pass.
+
+**Review trust level: medium** — Fix issues you reasonably agree with or believe the human wants fixed. Skip issues that are purely stylistic, subjective, or that you believe the human would not want changed.
+
+**To address failures:**
+1. Identify the failed gates from the console output.
+2. For CHECK failures: Read the \`.log\` file path provided in the output.
+3. For REVIEW failures: Read the \`.json\` file path provided in the "Review: <path>" output.
+4. For REVIEW violations: Update the \`"status"\` and \`"result"\` fields in the JSON file:
+   - Set \`"status": "fixed"\` with a brief description in \`"result"\` for issues you fix.
+   - Set \`"status": "skipped"\` with a brief reason in \`"result"\` for issues you skip.
+5. Run \`agent-gauntlet run\` to verify fixes.
+
+**Termination conditions:**
+- "Status: Passed" — All gates passed
+- "Status: Passed with warnings" — Remaining issues were skipped
+- "Status: Retry limit exceeded" — Run \`agent-gauntlet clean\` to archive the session and stop. This is the only case requiring manual clean; it signals unresolvable issues that need human review.`;
+}
+
+/**
  * Output a hook response to stdout.
  * Uses the Claude Code hook protocol format.
  */
@@ -235,6 +286,32 @@ function outputHookResponse(continueStop: boolean, stopReason?: string): void {
  */
 function verboseLog(message: string): void {
 	console.error(`[gauntlet] ${message}`);
+}
+
+/**
+ * Check if the run interval has elapsed since the last gauntlet run.
+ * Returns true if gauntlet should run, false if interval hasn't elapsed.
+ */
+async function shouldRunBasedOnInterval(
+	logDir: string,
+	intervalMinutes: number,
+): Promise<boolean> {
+	const state = await readExecutionState(logDir);
+	if (!state) {
+		// No execution state = always run
+		return true;
+	}
+
+	const lastRun = new Date(state.last_run_completed_at);
+	// Handle invalid date (corrupted state) - treat as needing to run
+	if (isNaN(lastRun.getTime())) {
+		return true;
+	}
+
+	const now = new Date();
+	const elapsedMinutes = (now.getTime() - lastRun.getTime()) / (1000 * 60);
+
+	return elapsedMinutes >= intervalMinutes;
 }
 
 export function registerStopHookCommand(program: Command): void {
@@ -276,11 +353,34 @@ export function registerStopHookCommand(program: Command): void {
 					process.exit(0);
 				}
 
-				// 5. Run gauntlet
+				// 5. Get log directory from project config
+				const logDir = path.join(projectCwd, await getLogDir(projectCwd));
+
+				// 6. Lock pre-check: If lock file exists, another gauntlet is running
+				const lockPath = path.join(logDir, getLockFilename());
+				if (await fileExists(lockPath)) {
+					verboseLog(
+						"Gauntlet already running (lock file exists), allowing stop",
+					);
+					process.exit(0);
+				}
+
+				// 7. Load global config and check run interval
+				const globalConfig = await loadGlobalConfig();
+				const intervalMinutes = globalConfig.stop_hook.run_interval_minutes;
+
+				if (!(await shouldRunBasedOnInterval(logDir, intervalMinutes))) {
+					verboseLog(
+						`Run interval (${intervalMinutes} min) not elapsed, allowing stop`,
+					);
+					process.exit(0);
+				}
+
+				// 8. Run gauntlet
 				verboseLog("Running gauntlet gates...");
 				const result = await runGauntlet(projectCwd);
 
-				// 6. Check termination conditions
+				// 9. Check termination conditions
 				if (result.success) {
 					verboseLog("Gauntlet passed!");
 					process.exit(0);
@@ -291,18 +391,15 @@ export function registerStopHookCommand(program: Command): void {
 					process.exit(0);
 				}
 
-				// 7. Check for infrastructure errors (allow stop)
+				// 10. Check for infrastructure errors (allow stop)
 				if (hasInfrastructureError(result.output)) {
 					verboseLog("Infrastructure error detected, allowing stop");
 					process.exit(0);
 				}
 
-				// 8. Block stop - gauntlet did not pass
+				// 11. Block stop - gauntlet did not pass
 				verboseLog("Gauntlet failed, blocking stop");
-				outputHookResponse(
-					false,
-					"Gauntlet gates did not pass. Please fix the issues before stopping.",
-				);
+				outputHookResponse(false, getStopReasonInstructions());
 				process.exit(0);
 			} catch (error: unknown) {
 				// On any unexpected error, allow stop to avoid blocking indefinitely

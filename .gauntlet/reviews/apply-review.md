@@ -14,19 +14,23 @@ reviewers:
 
 **Important Exclusion:** Do not review archived files - `openspec/changes/archive/*`.
 
-**Finding the Change:** Look in the git diff for `openspec/changes/*/tasks.md` files with items marked as completed (`- [x]`).
+**Finding the Change:**
+1. Look in the git diff for `openspec/changes/*/tasks.md` with completed items (`- [x]`)
+2. If no tasks.md in diff, read `openspec/changes/` to find non-archived proposals where the spec matches the implementation changes
 
 **Evaluation Criteria:**
 
-### 1. Implementation Completeness
-*   **Tasks:** Is every item in `tasks.md` completed as described?
-*   **Spec Compliance:** Does the implementation match all requirements and scenarios in the spec deltas?
-*   **Tests:** Does each `#### Scenario:` in the spec have a corresponding unit or integration test?
+### 1. Tasks Updated
+*   **REQUIRED:** The `tasks.md` file MUST be in the diff with tasks marked `[x]`. If implementation code is present but tasks.md is unchanged, report a **high priority** violation.
 
-### 2. Spec-Implementation Alignment
-*   **Divergence:** If implementation diverged from spec, is the spec updated to reflect actual behavior?
-*   **Accuracy:** Do the spec requirements still accurately describe what was built?
-*   **Design Docs:** If `design.md` exists for this change, does it reflect final technical decisions?
+### 2. Implementation Completeness
+*   **Tasks:** Is every `[x]` task actually implemented?
+*   **Spec Compliance:** Does implementation match spec requirements?
+*   **Tests:** Does each `#### Scenario:` have a corresponding test?
 
-### 3. Documentation Updates
-*   **Project Docs:** Are relevant docs (README, CLAUDE.md, etc.) updated to reflect the change, if needed?
+### 3. Spec-Implementation Alignment
+*   **Divergence:** If implementation diverged, is spec updated to reflect actual behavior?
+*   **Design Docs:** Does `design.md` (if present) reflect final decisions?
+
+### 4. Documentation
+*   Are relevant docs (README, CLAUDE.md) updated if the change affects them?

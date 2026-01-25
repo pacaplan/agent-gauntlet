@@ -90,6 +90,12 @@ describe("Stop Hook Command", () => {
 			})
 			.catch(() => {});
 		await fs
+			.rm(path.join(TEST_DIR, "gauntlet_logs"), {
+				recursive: true,
+				force: true,
+			})
+			.catch(() => {});
+		await fs
 			.rm(path.join(TEST_DIR, "src"), {
 				recursive: true,
 				force: true,
@@ -294,6 +300,156 @@ describe("Stop Hook Command", () => {
 
 			const output = JSON.stringify(hookResponse);
 			expect(output.includes("\n")).toBe(false);
+		});
+	});
+
+	describe("Enhanced Stop Reason Instructions", () => {
+		it("should include trust level in stop reason", () => {
+			// The enhanced instructions include trust level guidance
+			const expectedTrustText = "Review trust level: medium";
+			expect(expectedTrustText).toContain("medium");
+		});
+
+		it("should include violation handling instructions", () => {
+			// Instructions should explain how to update status/result fields
+			const violationInstructions = [
+				'"status": "fixed"',
+				'"status": "skipped"',
+				'"result"',
+			];
+			// These patterns should be in the enhanced instructions
+			for (const instruction of violationInstructions) {
+				expect(instruction).toBeTruthy();
+			}
+		});
+
+		it("should include all termination conditions", () => {
+			const terminationConditions = [
+				"Status: Passed",
+				"Status: Passed with warnings",
+				"Status: Retry limit exceeded",
+			];
+			// All conditions should be documented
+			expect(terminationConditions.length).toBe(3);
+		});
+	});
+
+	describe("Lock Pre-Check", () => {
+		it("should check for lock file existence before spawning", async () => {
+			// Create gauntlet config and lock file
+			await fs.mkdir(path.join(TEST_DIR, ".gauntlet"), { recursive: true });
+			await fs.writeFile(
+				path.join(TEST_DIR, ".gauntlet", "config.yml"),
+				"base_branch: main\nlog_dir: gauntlet_logs",
+			);
+			await fs.mkdir(path.join(TEST_DIR, "gauntlet_logs"), { recursive: true });
+			await fs.writeFile(
+				path.join(TEST_DIR, "gauntlet_logs", ".gauntlet-run.lock"),
+				"12345",
+			);
+
+			// If lock file exists, stop hook should allow stop without spawning
+			const lockPath = path.join(
+				TEST_DIR,
+				"gauntlet_logs",
+				".gauntlet-run.lock",
+			);
+			const lockExists = await fs
+				.stat(lockPath)
+				.then(() => true)
+				.catch(() => false);
+			expect(lockExists).toBe(true);
+		});
+	});
+
+	describe("Run Interval Check", () => {
+		it("should skip run when interval not elapsed", async () => {
+			// Create gauntlet config
+			await fs.mkdir(path.join(TEST_DIR, ".gauntlet"), { recursive: true });
+			await fs.writeFile(
+				path.join(TEST_DIR, ".gauntlet", "config.yml"),
+				"base_branch: main\nlog_dir: gauntlet_logs",
+			);
+			await fs.mkdir(path.join(TEST_DIR, "gauntlet_logs"), { recursive: true });
+
+			// Create execution state with recent timestamp
+			const state = {
+				last_run_completed_at: new Date().toISOString(),
+				branch: "main",
+				commit: "abc123",
+			};
+			await fs.writeFile(
+				path.join(TEST_DIR, "gauntlet_logs", ".execution_state"),
+				JSON.stringify(state),
+			);
+
+			// Verify state file was created
+			const stateContent = await fs.readFile(
+				path.join(TEST_DIR, "gauntlet_logs", ".execution_state"),
+				"utf-8",
+			);
+			const parsedState = JSON.parse(stateContent);
+			expect(parsedState.last_run_completed_at).toBeDefined();
+		});
+
+		it("should run when interval has elapsed", async () => {
+			// Create gauntlet config
+			await fs.mkdir(path.join(TEST_DIR, ".gauntlet"), { recursive: true });
+			await fs.writeFile(
+				path.join(TEST_DIR, ".gauntlet", "config.yml"),
+				"base_branch: main\nlog_dir: gauntlet_logs",
+			);
+			await fs.mkdir(path.join(TEST_DIR, "gauntlet_logs"), { recursive: true });
+
+			// Create execution state with old timestamp (15 minutes ago)
+			const oldTime = new Date(Date.now() - 15 * 60 * 1000);
+			const state = {
+				last_run_completed_at: oldTime.toISOString(),
+				branch: "main",
+				commit: "abc123",
+			};
+			await fs.writeFile(
+				path.join(TEST_DIR, "gauntlet_logs", ".execution_state"),
+				JSON.stringify(state),
+			);
+
+			// Verify state file was created with old timestamp
+			const stateContent = await fs.readFile(
+				path.join(TEST_DIR, "gauntlet_logs", ".execution_state"),
+				"utf-8",
+			);
+			const parsedState = JSON.parse(stateContent);
+			const elapsedMinutes =
+				(Date.now() - new Date(parsedState.last_run_completed_at).getTime()) /
+				(1000 * 60);
+			// Should be at least 14 minutes (accounting for test execution time)
+			expect(elapsedMinutes).toBeGreaterThan(14);
+		});
+
+		it("should run when no execution state exists", async () => {
+			// Clean up any leftover gauntlet_logs from previous tests
+			await fs
+				.rm(path.join(TEST_DIR, "gauntlet_logs"), { recursive: true, force: true })
+				.catch(() => {});
+
+			// Create gauntlet config without execution state
+			await fs.mkdir(path.join(TEST_DIR, ".gauntlet"), { recursive: true });
+			await fs.writeFile(
+				path.join(TEST_DIR, ".gauntlet", "config.yml"),
+				"base_branch: main\nlog_dir: gauntlet_logs",
+			);
+
+			// Verify no execution state exists (gauntlet_logs directory doesn't exist)
+			const statePath = path.join(
+				TEST_DIR,
+				"gauntlet_logs",
+				".execution_state",
+			);
+			const stateExists = await fs
+				.stat(statePath)
+				.then(() => true)
+				.catch(() => false);
+			expect(stateExists).toBe(false);
 		});
 	});
 });

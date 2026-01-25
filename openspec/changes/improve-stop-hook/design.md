@@ -67,8 +67,16 @@ The execution state is written at the END of execution (success or failure), cap
 
 ### Auto-Clean Decision Flow
 
+Auto-clean only runs on fresh starts, not during rerun/verification mode:
+
 ```
 run/check/review command starts
+        │
+        ▼
+   Has existing logs? ──────────────────► Yes ───► Skip auto-clean
+   (rerun/verification mode)                       (continue to lock)
+        │
+        No (fresh start)
         │
         ▼
    Read execution state
@@ -85,6 +93,8 @@ run/check/review command starts
                     ▼
             Continue normally
 ```
+
+**Why skip auto-clean during reruns:** When logs exist, we're in verification mode—the user is iterating on fixes for the current session. Auto-clean would destroy in-progress work and defeat the purpose of rerun mode.
 
 Branch detection:
 ```bash

@@ -1,10 +1,4 @@
-enhance spec review
-- tasks should include test section for tests with unit and/or integration test for every scenario in spec files.
-
-openspec reviewer
-- all tasks were implemented as described, including tests
-- update spec for divergence if needed
-- update other project docs as needed
+can we pipe the output from each cli to the log file so we can see what it's doing?
 
 ------------------------------------------------------------
 

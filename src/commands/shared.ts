@@ -1,8 +1,67 @@
 import fs from "node:fs/promises";
 import path from "node:path";
+import {
+	getCurrentBranch,
+	getExecutionStateFilename,
+	isCommitInBranch,
+	readExecutionState,
+} from "../utils/execution-state.js";
 import { clearSessionRef } from "../utils/session-ref";
 
 const LOCK_FILENAME = ".gauntlet-run.lock";
+
+export interface AutoCleanResult {
+	clean: boolean;
+	reason?: string;
+}
+
+/**
+ * Check if logs should be auto-cleaned based on execution context changes.
+ * Returns { clean: true, reason } if context has changed.
+ * Returns { clean: false } if context is unchanged or state file doesn't exist.
+ */
+export async function shouldAutoClean(
+	logDir: string,
+	baseBranch: string,
+): Promise<AutoCleanResult> {
+	const state = await readExecutionState(logDir);
+
+	// No state file = no auto-clean needed
+	if (!state) {
+		return { clean: false };
+	}
+
+	// Check if branch changed
+	try {
+		const currentBranch = await getCurrentBranch();
+		if (currentBranch !== state.branch) {
+			return { clean: true, reason: "branch changed" };
+		}
+	} catch {
+		// If we can't get the current branch, don't auto-clean
+		return { clean: false };
+	}
+
+	// Check if commit was merged into base branch
+	try {
+		const isMerged = await isCommitInBranch(state.commit, baseBranch);
+		if (isMerged) {
+			return { clean: true, reason: "commit merged" };
+		}
+	} catch {
+		// If we can't check merge status, don't auto-clean
+	}
+
+	return { clean: false };
+}
+
+/**
+ * Get the lock filename constant.
+ * Useful for checking lock status from other modules.
+ */
+export function getLockFilename(): string {
+	return LOCK_FILENAME;
+}
 
 export async function exists(filePath: string): Promise<boolean> {
 	try {
@@ -60,11 +119,37 @@ export async function hasExistingLogs(logDir: string): Promise<boolean> {
 	}
 }
 
+/**
+ * Check if there are current logs to archive.
+ * Returns true if there are .log or .json files in the log directory root.
+ */
+async function hasCurrentLogs(logDir: string): Promise<boolean> {
+	try {
+		const files = await fs.readdir(logDir);
+		const executionStateFile = getExecutionStateFilename();
+		return files.some(
+			(f) =>
+				(f.endsWith(".log") || f.endsWith(".json")) &&
+				f !== "previous" &&
+				f !== LOCK_FILENAME &&
+				f !== executionStateFile,
+		);
+	} catch {
+		return false;
+	}
+}
+
 export async function cleanLogs(logDir: string): Promise<void> {
 	const previousDir = path.join(logDir, "previous");
 
 	try {
+		// Guard: Return early if log directory doesn't exist
 		if (!(await exists(logDir))) {
+			return;
+		}
+
+		// Guard: Return early if no current logs to archive
+		if (!(await hasCurrentLogs(logDir))) {
 			return;
 		}
 
@@ -81,6 +166,7 @@ export async function cleanLogs(logDir: string): Promise<void> {
 		}
 
 		// 2. Move all files from logDir root into previous/ (except previous/ and lock file)
+		// This includes .execution_state file
 		const files = await fs.readdir(logDir);
 		await Promise.all(
 			files
