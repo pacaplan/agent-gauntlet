@@ -7,25 +7,19 @@ function formatTimestamp(): string {
 }
 
 /**
- * Compute the next run number for a given log file prefix.
- * Scans existing files in logDir and returns max+1 (or 1 if none exist).
+ * Compute the global run number for the log directory.
+ * Finds the highest run-number suffix across ALL log files and returns max+1.
  */
-async function nextRunNumber(logDir: string, prefix: string): Promise<number> {
+async function computeGlobalRunNumber(logDir: string): Promise<number> {
 	try {
 		const files = await fs.readdir(logDir);
 		let max = 0;
-		const expectedStart = `${prefix}.`;
-		const expectedEnd = ".log";
 		for (const file of files) {
-			if (!file.startsWith(expectedStart) || !file.endsWith(expectedEnd)) {
-				continue;
-			}
-			const middle = file.slice(
-				expectedStart.length,
-				file.length - expectedEnd.length,
-			);
-			if (/^\d+$/.test(middle)) {
-				const n = parseInt(middle, 10);
+			if (!file.endsWith(".log") && !file.endsWith(".json")) continue;
+			// Pattern: <anything>.<number>.(log|json)
+			const m = file.match(/\.(\d+)\.(log|json)$/);
+			if (m) {
+				const n = parseInt(m[1]!, 10);
 				if (n > max) max = n;
 			}
 		}
@@ -37,28 +31,44 @@ async function nextRunNumber(logDir: string, prefix: string): Promise<number> {
 
 export class Logger {
 	private initializedFiles: Set<string> = new Set();
-	private runNumberCache: Map<string, number> = new Map();
+	private globalRunNumber: number | null = null;
 
 	constructor(private logDir: string) {}
 
 	async init() {
 		await fs.mkdir(this.logDir, { recursive: true });
+		this.globalRunNumber = await computeGlobalRunNumber(this.logDir);
 	}
 
 	async close() {
 		// No-op - using append mode
 	}
 
-	async getLogPath(jobId: string, adapterName?: string): Promise<string> {
-		const safeName = sanitizeJobId(jobId);
-		const prefix = adapterName ? `${safeName}_${adapterName}` : safeName;
+	getRunNumber(): number {
+		return this.globalRunNumber ?? 1;
+	}
 
-		if (!this.runNumberCache.has(prefix)) {
-			const num = await nextRunNumber(this.logDir, prefix);
-			this.runNumberCache.set(prefix, num);
+	async getLogPath(
+		jobId: string,
+		adapterName?: string,
+		reviewIndex?: number,
+	): Promise<string> {
+		const safeName = sanitizeJobId(jobId);
+		const runNum = this.globalRunNumber ?? 1;
+
+		let filename: string;
+		if (adapterName && reviewIndex !== undefined) {
+			// Review gate with index: <jobId>_<adapter>@<index>.<runNum>.log
+			filename = `${safeName}_${adapterName}@${reviewIndex}.${runNum}.log`;
+		} else if (adapterName) {
+			// Review gate without explicit index (backwards compat for single review)
+			filename = `${safeName}_${adapterName}@1.${runNum}.log`;
+		} else {
+			// Check gate: <jobId>.<runNum>.log
+			filename = `${safeName}.${runNum}.log`;
 		}
-		const runNum = this.runNumberCache.get(prefix) ?? 1;
-		return path.join(this.logDir, `${prefix}.${runNum}.log`);
+
+		return path.join(this.logDir, filename);
 	}
 
 	private async initFile(logPath: string): Promise<void> {
@@ -92,9 +102,10 @@ export class Logger {
 		jobId: string,
 	): (
 		adapterName?: string,
+		reviewIndex?: number,
 	) => Promise<{ logger: (text: string) => Promise<void>; logPath: string }> {
-		return async (adapterName?: string) => {
-			const logPath = await this.getLogPath(jobId, adapterName);
+		return async (adapterName?: string, reviewIndex?: number) => {
+			const logPath = await this.getLogPath(jobId, adapterName, reviewIndex);
 			await this.initFile(logPath);
 
 			const logger = async (text: string) => {

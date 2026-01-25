@@ -16,3 +16,16 @@ Use `@/openspec/AGENTS.md` to learn:
 Keep this managed block so 'openspec update' can refresh the instructions.
 
 <!-- OPENSPEC:END -->
+
+# Development
+
+## Tech Stack
+- **Runtime**: [Bun](https://bun.sh) (v1.0+)
+- **Language**: TypeScript (ESM)
+- **Linter/Formatter**: [Biome](https://biomejs.dev)
+- **CLI Framework**: Commander.js
+
+## Code Style
+- Use strict TypeScript.
+- Prefer functional patterns where appropriate.
+- Keep CLI commands in `src/commands`.

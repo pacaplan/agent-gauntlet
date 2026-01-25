@@ -58,7 +58,7 @@ describe("ReviewGateExecutor Rerun Logic", () => {
 		};
 
 		const previousFailures = new Map();
-		previousFailures.set("mock-adapter", [
+		previousFailures.set("1", [
 			{
 				file: "file.ts",
 				line: 1,
@@ -143,7 +143,7 @@ describe("ReviewGateExecutor Rerun Logic", () => {
 		};
 
 		const previousFailures = new Map();
-		previousFailures.set("mock-adapter", [
+		previousFailures.set("1", [
 			{
 				file: "file.ts",
 				line: 1,

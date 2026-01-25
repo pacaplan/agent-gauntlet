@@ -6,6 +6,7 @@ import { EntryPointExpander } from "../core/entry-point.js";
 import { JobGenerator } from "../core/job.js";
 import { Runner } from "../core/runner.js";
 import { ConsoleReporter } from "../output/console.js";
+import { startConsoleLog } from "../output/console-log.js";
 import { Logger } from "../output/logger.js";
 import {
 	findPreviousFailures,
@@ -36,8 +37,10 @@ export function registerRunCommand(program: Command): void {
 		.action(async (options) => {
 			let config: Awaited<ReturnType<typeof loadConfig>> | undefined;
 			let lockAcquired = false;
+			let restoreConsole: (() => void) | undefined;
 			try {
 				config = await loadConfig();
+				restoreConsole = await startConsoleLog(config.project.log_dir);
 				await acquireLock(config.project.log_dir);
 				lockAcquired = true;
 
@@ -50,9 +53,9 @@ export function registerRunCommand(program: Command): void {
 						: null) ||
 					config.project.base_branch;
 
-				// Detect rerun mode: if logs exist and no explicit diff flags, use uncommitted + inject failures
+				// Detect rerun mode: if logs exist and not targeting a specific commit, enter verification mode
 				const logsExist = await hasExistingLogs(config.project.log_dir);
-				const isRerun = logsExist && !options.uncommitted && !options.commit;
+				const isRerun = logsExist && !options.commit;
 
 				let failuresMap:
 					| Map<string, Map<string, PreviousViolation[]>>
@@ -76,7 +79,11 @@ export function registerRunCommand(program: Command): void {
 					for (const gateFailure of previousFailures) {
 						const adapterMap = new Map<string, PreviousViolation[]>();
 						for (const af of gateFailure.adapterFailures) {
-							adapterMap.set(af.adapterName, af.violations);
+							// Use review index as key if available (new @index pattern)
+							const key = af.reviewIndex
+								? String(af.reviewIndex)
+								: af.adapterName;
+							adapterMap.set(key, af.violations);
 						}
 						failuresMap.set(gateFailure.jobId, adapterMap);
 					}
@@ -126,6 +133,7 @@ export function registerRunCommand(program: Command): void {
 				if (changes.length === 0) {
 					console.log(chalk.green("No changes detected."));
 					await releaseLock(config.project.log_dir);
+					restoreConsole?.();
 					process.exit(0);
 				}
 
@@ -144,6 +152,7 @@ export function registerRunCommand(program: Command): void {
 				if (jobs.length === 0) {
 					console.log(chalk.yellow("No applicable gates for these changes."));
 					await releaseLock(config.project.log_dir);
+					restoreConsole?.();
 					process.exit(0);
 				}
 
@@ -169,6 +178,7 @@ export function registerRunCommand(program: Command): void {
 				}
 
 				await releaseLock(config.project.log_dir);
+				restoreConsole?.();
 				process.exit(success ? 0 : 1);
 			} catch (error: unknown) {
 				if (config && lockAcquired) {
@@ -176,6 +186,7 @@ export function registerRunCommand(program: Command): void {
 				}
 				const err = error as { message?: string };
 				console.error(chalk.red("Error:"), err.message);
+				restoreConsole?.();
 				process.exit(1);
 			}
 		});

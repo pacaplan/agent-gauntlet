@@ -1,6 +1,4 @@
-add retry limit to config and check it from script (remove from prompt)
-
-allow multiple reviews from same agent. go in round robin style, skipping unavailable ones. not possible to have error for not enough CLs available.
+log cleanup should not do anything if logs dir is empty or does not exist.
 
 ------------------------------------------------------------
 

@@ -12,6 +12,7 @@ import {
 	registerListCommand,
 	registerReviewCommand,
 	registerRunCommand,
+	registerValidateCommand,
 } from "./commands/index.js";
 
 const program = new Command();
@@ -31,6 +32,7 @@ registerDetectCommand(program);
 registerListCommand(program);
 registerHealthCommand(program);
 registerInitCommand(program);
+registerValidateCommand(program);
 registerHelpCommand(program);
 
 // Default action: help

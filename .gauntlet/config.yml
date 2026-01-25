@@ -1,4 +1,4 @@
-base_branch: origin/main
+base_branch: development
 log_dir: gauntlet_logs
 allow_parallel: true
 cli:
@@ -14,6 +14,7 @@ entry_points:
       - lint
       - test
       - security-code
+      - schema-validate
     reviews:
       - code-quality
   - path: "package.json"

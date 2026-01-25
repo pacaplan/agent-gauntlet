@@ -77,7 +77,11 @@ export class ConsoleReporter {
 		}
 	}
 
-	async printSummary(results: GateResult[], logDir?: string) {
+	async printSummary(
+		results: GateResult[],
+		logDir?: string,
+		statusOverride?: string,
+	) {
 		console.log(
 			`\n${chalk.bold("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")}`,
 		);
@@ -152,7 +156,10 @@ export class ConsoleReporter {
 		let overallStatus = "Passed";
 		let statusColor = chalk.green;
 
-		if (errored.length > 0) {
+		if (statusOverride) {
+			overallStatus = statusOverride;
+			statusColor = chalk.red;
+		} else if (errored.length > 0) {
 			overallStatus = "Error";
 			statusColor = chalk.magenta;
 		} else if (failed.length > 0) {

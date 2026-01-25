@@ -1,0 +1,4 @@
+command: bun run src/index.ts validate
+working_directory: .
+parallel: true
+run_locally: true
