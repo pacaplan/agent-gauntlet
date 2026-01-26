@@ -1,9 +1,13 @@
-import { spawn } from "node:child_process";
 import fs from "node:fs/promises";
 import path from "node:path";
 import type { Command } from "commander";
 import YAML from "yaml";
 import { loadGlobalConfig } from "../config/global.js";
+import { executeRun } from "../core/run-executor.js";
+import {
+	type GauntletStatus,
+	isBlockingStatus,
+} from "../types/gauntlet-status.js";
 import { DebugLogger, mergeDebugLogConfig } from "../utils/debug-log.js";
 import { readExecutionState } from "../utils/execution-state.js";
 import { getLockFilename } from "./shared.js";
@@ -17,30 +21,11 @@ interface StopHookInput {
 	stop_hook_active?: boolean;
 }
 
-/**
- * All possible outcomes from the stop hook.
- * These status codes provide transparency into why a stop was approved or blocked.
- */
-type StopHookStatus =
-	| "passed" // Gauntlet ran successfully (exit 0, gates passed)
-	| "no_applicable_gates" // Gauntlet exit 0 but no gates matched
-	| "termination_passed" // Non-zero exit with "Status: Passed" in output
-	| "termination_warnings" // Non-zero exit with "Status: Passed with warnings"
-	| "termination_retry_limit" // Non-zero exit with "Status: Retry limit exceeded"
-	| "interval_not_elapsed" // Skipped because run interval hasn't passed
-	| "lock_exists" // Another gauntlet run is in progress
-	| "infrastructure_error" // Spawn failure, timeout, or similar
-	| "failed" // Gauntlet failed, retries remaining (blocks stop)
-	| "no_config" // No .gauntlet/config.yml found (not a gauntlet project)
-	| "stop_hook_active" // Already in stop hook cycle (infinite loop prevention)
-	| "error" // Unexpected error in stop hook itself
-	| "invalid_input"; // Failed to parse JSON input
-
 interface HookResponse {
 	decision: "block" | "approve";
 	reason?: string; // This becomes the prompt fed back to Claude
 	systemMessage?: string; // Additional context for Claude
-	status: StopHookStatus; // Machine-readable status code
+	status: GauntletStatus; // Machine-readable status code (unified type)
 	message: string; // Human-friendly explanation
 }
 
@@ -51,16 +36,6 @@ interface MinimalConfig {
 		max_size_mb?: number;
 	};
 }
-
-/**
- * Infrastructure errors that should allow stop (gauntlet can't run properly).
- * Uses specific error messages to avoid false positives from legitimate output.
- * Note: Spawn failures (ENOENT, command not found) are handled by the spawn error
- * handler which returns success: true, so they don't need to be matched here.
- */
-const INFRASTRUCTURE_ERRORS = [
-	"A gauntlet run is already in progress", // Exact gauntlet lock message
-] as const;
 
 /**
  * Timeout for reading stdin (in milliseconds).
@@ -163,29 +138,6 @@ async function fileExists(filePath: string): Promise<boolean> {
 }
 
 /**
- * Check if we're running in the agent-gauntlet repository itself (for dogfooding).
- */
-async function isLocalDev(cwd: string): Promise<boolean> {
-	try {
-		const hasIndex = await fileExists(path.join(cwd, "src/index.ts"));
-		const hasPackageJson = await fileExists(path.join(cwd, "package.json"));
-
-		if (!hasIndex || !hasPackageJson) {
-			return false;
-		}
-
-		const packageJsonContent = await fs.readFile(
-			path.join(cwd, "package.json"),
-			"utf-8",
-		);
-		const packageJson = JSON.parse(packageJsonContent);
-		return packageJson.name === "agent-gauntlet";
-	} catch {
-		return false;
-	}
-}
-
-/**
  * Read the log_dir from project config without full validation.
  */
 async function getLogDir(projectCwd: string): Promise<string> {
@@ -213,122 +165,6 @@ async function getDebugLogConfig(
 	} catch {
 		return undefined;
 	}
-}
-
-/**
- * Timeout for gauntlet execution (in milliseconds).
- * Matches the hook timeout of 300 seconds (5 minutes).
- */
-const GAUNTLET_TIMEOUT_MS = 5 * 60 * 1000;
-
-/**
- * Result of running the gauntlet.
- */
-interface GauntletResult {
-	output: string;
-	success: boolean;
-	infrastructureError?: string; // Set when spawn fails or timeout occurs
-}
-
-/**
- * Run the gauntlet and capture its output.
- * Returns the stdout/stderr combined output, success status, and any infrastructure error.
- * Includes a timeout to prevent hanging indefinitely.
- */
-async function runGauntlet(cwd: string): Promise<GauntletResult> {
-	const isLocal = await isLocalDev(cwd);
-	const command = isLocal ? "bun" : "agent-gauntlet";
-	const args = isLocal ? ["src/index.ts", "run"] : ["run"];
-
-	return new Promise((resolve) => {
-		const child = spawn(command, args, {
-			cwd,
-			stdio: ["ignore", "pipe", "pipe"],
-			env: { ...process.env },
-		});
-
-		let output = "";
-		let resolved = false;
-
-		const timer = setTimeout(() => {
-			if (!resolved) {
-				resolved = true;
-				child.kill("SIGKILL");
-				const timeoutMsg = `Gauntlet timed out after ${GAUNTLET_TIMEOUT_MS / 1000} seconds`;
-				resolve({
-					output: `${output}\n${timeoutMsg}`,
-					success: false,
-					infrastructureError: timeoutMsg,
-				});
-			}
-		}, GAUNTLET_TIMEOUT_MS);
-
-		child.stdout.on("data", (data: Buffer) => {
-			output += data.toString();
-		});
-
-		child.stderr.on("data", (data: Buffer) => {
-			output += data.toString();
-		});
-
-		child.on("close", (code) => {
-			if (!resolved) {
-				resolved = true;
-				clearTimeout(timer);
-				resolve({
-					output,
-					success: code === 0,
-				});
-			}
-		});
-
-		child.on("error", (err) => {
-			if (!resolved) {
-				resolved = true;
-				clearTimeout(timer);
-				// If command fails to spawn (e.g., not found), mark as infrastructure error
-				const errorMsg = `Error spawning gauntlet: ${err.message}`;
-				resolve({
-					output: errorMsg,
-					success: false,
-					infrastructureError: errorMsg,
-				});
-			}
-		});
-	});
-}
-
-/**
- * Get the specific termination status from gauntlet output.
- * Returns the appropriate status code, or null if no termination condition is found.
- */
-function getTerminationStatus(
-	output: string,
-):
-	| "termination_passed"
-	| "termination_warnings"
-	| "termination_retry_limit"
-	| null {
-	if (output.includes("Status: Passed with warnings")) {
-		return "termination_warnings";
-	}
-	if (output.includes("Status: Passed")) {
-		return "termination_passed";
-	}
-	if (output.includes("Status: Retry limit exceeded")) {
-		return "termination_retry_limit";
-	}
-	return null;
-}
-
-/**
- * Check if the gauntlet output indicates an infrastructure error.
- * Infrastructure errors should allow stop rather than blocking.
- */
-function hasInfrastructureError(output: string): boolean {
-	return INFRASTRUCTURE_ERRORS.some((error) =>
-		output.toLowerCase().includes(error.toLowerCase()),
-	);
 }
 
 /**
@@ -367,30 +203,26 @@ ${logPathSection}
  * These messages explain why the stop was approved or blocked.
  */
 function getStatusMessage(
-	status: StopHookStatus,
+	status: GauntletStatus,
 	context?: { intervalMinutes?: number; errorMessage?: string },
 ): string {
 	switch (status) {
 		case "passed":
 			return "Gauntlet passed — all gates completed successfully.";
+		case "passed_with_warnings":
+			return "Gauntlet completed — passed with warnings (some issues were skipped).";
 		case "no_applicable_gates":
 			return "Gauntlet passed — no applicable gates matched current changes.";
-		case "termination_passed":
-			return "Gauntlet completed — all gates passed.";
-		case "termination_warnings":
-			return "Gauntlet completed — passed with warnings (some issues were skipped).";
-		case "termination_retry_limit":
+		case "no_changes":
+			return "Gauntlet passed — no changes detected.";
+		case "retry_limit_exceeded":
 			return "Gauntlet terminated — retry limit exceeded. Run `agent-gauntlet clean` to archive and continue.";
 		case "interval_not_elapsed":
 			return context?.intervalMinutes
 				? `Gauntlet skipped — run interval (${context.intervalMinutes} min) not elapsed since last run.`
 				: "Gauntlet skipped — run interval not elapsed since last run.";
-		case "lock_exists":
+		case "lock_conflict":
 			return "Gauntlet skipped — another gauntlet run is already in progress.";
-		case "infrastructure_error":
-			return context?.errorMessage
-				? `Gauntlet infrastructure error — ${context.errorMessage}`
-				: "Gauntlet infrastructure error — unable to execute gauntlet.";
 		case "failed":
 			return "Gauntlet failed — issues must be fixed before stopping.";
 		case "no_config":
@@ -411,18 +243,18 @@ function getStatusMessage(
  * Uses the Claude Code hook protocol format:
  * - decision: "block" | "approve" - whether to block or allow the stop
  * - reason: string - when blocking, this becomes the prompt fed back to Claude automatically
- * - status: machine-readable status code for transparency
+ * - status: machine-readable status code for transparency (unified GauntletStatus)
  * - message: human-friendly explanation of the outcome
  */
 function outputHookResponse(
-	status: StopHookStatus,
+	status: GauntletStatus,
 	options?: {
 		reason?: string;
 		intervalMinutes?: number;
 		errorMessage?: string;
 	},
 ): void {
-	const block = status === "failed";
+	const block = isBlockingStatus(status);
 	const message = getStatusMessage(status, {
 		intervalMinutes: options?.intervalMinutes,
 		errorMessage: options?.errorMessage,
@@ -502,7 +334,7 @@ export {
 	outputHookResponse,
 	getStatusMessage,
 };
-export type { StopHookStatus, HookResponse };
+export type { GauntletStatus as StopHookStatus, HookResponse };
 
 export function registerStopHookCommand(program: Command): void {
 	program
@@ -566,8 +398,8 @@ export function registerStopHookCommand(program: Command): void {
 					verboseLog(
 						"Gauntlet already running (lock file exists), allowing stop",
 					);
-					await debugLogger.logStopHook("allow", "lock_exists");
-					outputHookResponse("lock_exists");
+					await debugLogger.logStopHook("allow", "lock_conflict");
+					outputHookResponse("lock_conflict");
 					return;
 				}
 
@@ -589,60 +421,27 @@ export function registerStopHookCommand(program: Command): void {
 					verboseLog("Existing log files found, rerun required");
 				}
 
-				// 9. Run gauntlet
+				// 9. Run gauntlet using direct function invocation
 				verboseLog("Running gauntlet gates...");
-				const result = await runGauntlet(projectCwd);
+				const result = await executeRun({ silent: true, cwd: projectCwd });
 
-				// 10. Check for infrastructure errors first (spawn failure, timeout)
-				if (result.infrastructureError) {
-					verboseLog(
-						`Infrastructure error detected: ${result.infrastructureError}`,
-					);
-					await debugLogger.logStopHook("allow", "infrastructure_error");
-					outputHookResponse("infrastructure_error", {
-						errorMessage: result.infrastructureError,
-					});
-					return;
-				}
+				// 10. Handle results using unified GauntletStatus directly
+				verboseLog(`Gauntlet completed with status: ${result.status}`);
+				await debugLogger.logStopHook(
+					isBlockingStatus(result.status) ? "block" : "allow",
+					result.status,
+				);
 
-				// 11. Handle gauntlet results based on exit code and output
-				if (result.success) {
-					// Exit 0 - check if any gates actually ran
-					if (result.output.includes("No applicable gates")) {
-						verboseLog("Gauntlet passed (no applicable gates)");
-						await debugLogger.logStopHook("allow", "no_applicable_gates");
-						outputHookResponse("no_applicable_gates");
-						return;
-					}
-					verboseLog("Gauntlet passed!");
-					await debugLogger.logStopHook("allow", "passed");
-					outputHookResponse("passed");
-					return;
-				}
+				// Get console log path for failed status
+				const consoleLogPath =
+					result.consoleLogPath ?? (await findLatestConsoleLog(logDir));
 
-				// Non-zero exit - check for termination conditions
-				const terminationStatus = getTerminationStatus(result.output);
-				if (terminationStatus) {
-					verboseLog(`Termination condition met: ${terminationStatus}`);
-					await debugLogger.logStopHook("allow", terminationStatus);
-					outputHookResponse(terminationStatus);
-					return;
-				}
-
-				// 12. Check for infrastructure errors in output (e.g., lock message)
-				if (hasInfrastructureError(result.output)) {
-					verboseLog("Infrastructure error detected in output, allowing stop");
-					await debugLogger.logStopHook("allow", "infrastructure_error");
-					outputHookResponse("infrastructure_error");
-					return;
-				}
-
-				// 13. Block stop - gauntlet did not pass
-				verboseLog("Gauntlet failed, blocking stop");
-				await debugLogger.logStopHook("block", "failed");
-				const consoleLogPath = await findLatestConsoleLog(logDir);
-				outputHookResponse("failed", {
-					reason: getStopReasonInstructions(consoleLogPath),
+				outputHookResponse(result.status, {
+					reason:
+						result.status === "failed"
+							? getStopReasonInstructions(consoleLogPath)
+							: undefined,
+					errorMessage: result.errorMessage,
 				});
 			} catch (error: unknown) {
 				// On any unexpected error, allow stop to avoid blocking indefinitely

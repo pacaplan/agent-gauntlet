@@ -17,7 +17,6 @@ entry_points:
       - schema-validate
     reviews:
       - code-quality
-      - apply-review
   - path: "package.json"
     checks:
       - build
@@ -30,4 +29,7 @@ entry_points:
     checks:
       - openspec-validate
     reviews:
-      - task-review
+      - change-review
+  - path: "openspec/changes/**/tasks.md"
+    reviews:
+      - task-review      

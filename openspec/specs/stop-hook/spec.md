@@ -47,47 +47,93 @@ The command SHALL only enforce gauntlet completion for projects with gauntlet co
 
 ### Requirement: Gauntlet Execution
 
-The command SHALL run the gauntlet and capture output to check termination conditions.
+The command SHALL invoke the gauntlet run logic directly as a function call instead of spawning a subprocess.
 
-#### Scenario: Local development environment
-- **GIVEN** the command is running in the agent-gauntlet repository (detected by package.json name)
+#### Scenario: Direct function invocation
+- **GIVEN** the stop-hook determines gauntlet should run
 - **WHEN** it executes the gauntlet
-- **THEN** it SHALL use `bun src/index.ts run`
+- **THEN** it SHALL call `executeRun()` directly as a function
+- **AND** it SHALL NOT spawn a subprocess
+- **AND** it SHALL receive a structured `RunResult` object
 
-#### Scenario: Installed package environment
-- **GIVEN** the command is running in a project with agent-gauntlet installed
-- **WHEN** it executes the gauntlet
-- **THEN** it SHALL use `agent-gauntlet run`
+#### Scenario: Silent mode execution
+- **GIVEN** the stop-hook invokes executeRun
+- **WHEN** the gauntlet runs
+- **THEN** it SHALL pass `silent: true` to suppress console output
+- **AND** the gauntlet SHALL still write to log files normally
 
 #### Scenario: Gauntlet execution error
-- **GIVEN** the gauntlet command fails to execute (e.g., missing dependencies)
+- **GIVEN** the gauntlet function returns an error status
 - **WHEN** the error occurs
 - **THEN** it SHALL allow stop (exit 0) to avoid blocking indefinitely on infrastructure issues
 - **AND** the rationale is that blocking on transient failures would frustrate developers without providing value
 
-### Requirement: Termination Condition Checking
+### Requirement: Unified Status Type
 
-The command SHALL check gauntlet output for valid termination conditions.
+The system MUST use a single `GauntletStatus` type for all gauntlet outcomes, shared between the run executor and stop-hook.
 
-#### Scenario: Status Passed
-- **GIVEN** the gauntlet output contains "Status: Passed"
-- **WHEN** the command checks termination
-- **THEN** it SHALL exit 0 (allowing stop)
+#### Scenario: Direct status usage
+- **GIVEN** executeRun returns a RunResult with status
+- **WHEN** the stop-hook processes the result
+- **THEN** it SHALL use the `GauntletStatus` value directly in the hook response
+- **AND** it SHALL NOT map or translate the status to a different value
+- **AND** the same status type is used by both executor and hook response
 
-#### Scenario: Status Passed with warnings
-- **GIVEN** the gauntlet output contains "Status: Passed with warnings"
-- **WHEN** the command checks termination
-- **THEN** it SHALL exit 0 (allowing stop)
+#### Scenario: No status mapping
+- **GIVEN** the executor returns a `GauntletStatus` value
+- **WHEN** the stop-hook builds its response
+- **THEN** it SHALL use that exact status value in the hook response
+- **AND** no mapping function SHALL exist between different status types
 
-#### Scenario: Status Retry limit exceeded
-- **GIVEN** the gauntlet output contains "Status: Retry limit exceeded"
-- **WHEN** the command checks termination
-- **THEN** it SHALL exit 0 (allowing stop) to prevent further retry attempts
+#### Scenario: Blocking determination
+- **GIVEN** a `GauntletStatus` value is received
+- **WHEN** the stop-hook determines the hook decision
+- **THEN** it SHALL use a shared `isBlockingStatus()` helper
+- **AND** only `"failed"` status SHALL result in a block decision
 
-#### Scenario: Gates failed
-- **GIVEN** the gauntlet output does not contain any termination condition
-- **WHEN** the command checks termination
-- **THEN** it SHALL output JSON `{"decision": "block", "reason": "..."}` and exit 0 (Claude Code processes the JSON, blocks the stop, and feeds `reason` back as the next prompt)
+### Requirement: Run Executor Function
+
+The system MUST provide an `executeRun()` function that encapsulates run command logic without process termination.
+
+#### Scenario: No process.exit in executor
+- **GIVEN** a caller invokes executeRun()
+- **WHEN** the run completes (success or failure)
+- **THEN** the function SHALL return a RunResult
+- **AND** the function SHALL NOT call process.exit()
+- **AND** the caller can inspect the result and decide on next steps
+
+#### Scenario: RunResult contains metadata
+- **GIVEN** a gauntlet run completes
+- **WHEN** executeRun returns
+- **THEN** the RunResult SHALL contain:
+  - `status`: the GauntletStatus value (used directly, no mapping)
+  - `message`: human-readable explanation
+  - `consoleLogPath`: path to latest console.N.log (if applicable)
+  - `errorMessage`: error details (if status is error)
+
+### Requirement: Status-Based Decision Making
+
+The command SHALL determine allow/block decisions based on the unified GauntletStatus.
+
+#### Scenario: Status passed
+- **GIVEN** executeRun returns `{ status: "passed" }`
+- **WHEN** the command processes the result
+- **THEN** it SHALL allow stop (approve decision)
+
+#### Scenario: Status passed_with_warnings
+- **GIVEN** executeRun returns `{ status: "passed_with_warnings" }`
+- **WHEN** the command processes the result
+- **THEN** it SHALL allow stop (approve decision)
+
+#### Scenario: Status retry_limit_exceeded
+- **GIVEN** executeRun returns `{ status: "retry_limit_exceeded" }`
+- **WHEN** the command processes the result
+- **THEN** it SHALL allow stop (approve decision) to prevent further retry attempts
+
+#### Scenario: Status failed
+- **GIVEN** executeRun returns `{ status: "failed" }`
+- **WHEN** the command processes the result
+- **THEN** it SHALL output JSON `{"decision": "block", "reason": "..."}` (Claude Code processes the JSON, blocks the stop, and feeds `reason` back as the next prompt)
 
 ### Requirement: Block Decision Output
 
@@ -199,19 +245,19 @@ The stop-hook command MUST skip gauntlet execution if the configured run interva
 - **THEN** the system SHALL run the gauntlet normally
 
 ### Requirement: Stop Hook Lock Pre-Check
-The stop-hook command MUST check if the gauntlet lock file exists before spawning the gauntlet subprocess. If the lock file exists, the stop-hook SHALL allow the agent to stop immediately without running the gauntlet, since another gauntlet is already in progress.
+The stop-hook command MUST check if the gauntlet lock file exists before invoking the run executor. If the lock file exists, the stop-hook SHALL allow the agent to stop immediately without running the gauntlet, since another gauntlet is already in progress.
 
 #### Scenario: Lock file exists - allow stop
 - **GIVEN** the lock file `.gauntlet-run.lock` exists in the log directory
 - **WHEN** the stop-hook command starts
-- **THEN** the system SHALL NOT spawn a gauntlet subprocess
+- **THEN** the system SHALL NOT invoke executeRun()
 - **AND** the system SHALL allow stop (no blocking response)
 - **AND** the system SHALL log a message indicating gauntlet already running
 
 #### Scenario: Lock file does not exist - run gauntlet
 - **GIVEN** the lock file `.gauntlet-run.lock` does not exist
 - **WHEN** the stop-hook command starts
-- **THEN** the system SHALL proceed to run the gauntlet normally
+- **THEN** the system SHALL proceed to invoke executeRun()
 
 ### Requirement: Enhanced Stop Reason Instructions
 

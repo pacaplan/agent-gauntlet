@@ -22,6 +22,20 @@ import type { Job } from "./job.js";
 
 const execAsync = promisify(exec);
 
+/**
+ * Structured result from Runner.run() for proper status mapping.
+ */
+export interface RunnerOutcome {
+	/** Whether all gates passed */
+	allPassed: boolean;
+	/** Whether any violations were skipped (for passed_with_warnings) */
+	anySkipped: boolean;
+	/** Whether retry limit was exceeded */
+	retryLimitExceeded: boolean;
+	/** Whether any gates had errors */
+	anyErrors: boolean;
+}
+
 export class Runner {
 	private checkExecutor = new CheckGateExecutor();
 	private reviewExecutor = new ReviewGateExecutor();
@@ -42,7 +56,7 @@ export class Runner {
 		private debugLogger?: DebugLogger,
 	) {}
 
-	async run(jobs: Job[]): Promise<boolean> {
+	async run(jobs: Job[]): Promise<RunnerOutcome> {
 		await this.logger.init();
 
 		// Enforce retry limit before executing gates
@@ -55,7 +69,12 @@ export class Runner {
 				`Retry limit exceeded: run ${currentRunNumber} exceeds max allowed ${maxAllowedRuns} (max_retries: ${maxRetries}). Human input required on what to do next.`,
 			);
 			process.exitCode = 1;
-			return false;
+			return {
+				allPassed: false,
+				anySkipped: false,
+				retryLimitExceeded: true,
+				anyErrors: false,
+			};
 		}
 
 		const { runnableJobs, preflightResults } = await this.preflight(jobs);
@@ -83,20 +102,36 @@ export class Runner {
 		await Promise.all([...parallelPromises, sequentialPromise]);
 
 		const allPassed = this.results.every((r) => r.status === "pass");
+		const anySkipped = this.results.some(
+			(r) => r.skipped && r.skipped.length > 0,
+		);
+		const anyErrors = this.results.some((r) => r.status === "error");
+		const retryLimitExceeded =
+			!allPassed && currentRunNumber === maxAllowedRuns;
 
 		// If on the final allowed run and gates failed, report "Retry limit exceeded"
-		if (!allPassed && currentRunNumber === maxAllowedRuns) {
+		if (retryLimitExceeded) {
 			await this.reporter.printSummary(
 				this.results,
 				this.config.project.log_dir,
 				"Retry limit exceeded",
 			);
-			return false;
+			return {
+				allPassed: false,
+				anySkipped,
+				retryLimitExceeded: true,
+				anyErrors,
+			};
 		}
 
 		await this.reporter.printSummary(this.results, this.config.project.log_dir);
 
-		return allPassed;
+		return {
+			allPassed,
+			anySkipped,
+			retryLimitExceeded: false,
+			anyErrors,
+		};
 	}
 
 	private async executeJob(job: Job): Promise<void> {

@@ -85,9 +85,10 @@ describe("Runner", () => {
 		// biome-ignore lint/suspicious/noExplicitAny: Accessing private method for testing
 		(runner as any).checkAdapter = mock(async () => true);
 
-		const success = await runner.run([job]);
+		const outcome = await runner.run([job]);
 
-		expect(success).toBe(false);
+		expect(outcome.allPassed).toBe(false);
+		expect(outcome.anyErrors).toBe(true);
 		expect(mockReporter.onJobStart).toHaveBeenCalled();
 		expect(mockReporter.onJobComplete).toHaveBeenCalledWith(
 			job,

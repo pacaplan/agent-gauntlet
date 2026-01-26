@@ -1,21 +1,15 @@
 
 
+ i found another major bug, it's not resulting from your changes but i want you to fix it now as it is a blocker.
+
+  the stop hook keeps incorrectly allowing the stop for reason of interval_not_elapsed. when this happens, it must **not** update the timestamp in .execution_state; that's effectively blocking `run` from ever
+  executing (even after time interval elapses).
+
+  stop hook should only update timestamp for certain statuses, help me identify which ones that should be, then we will write up proposal.
+
+  
 
 ------------------------------------------------------------
-
-enhance debug  logger
-- log the branch name on every message
-- log the complete RunResult at end of every executeRun()
-- i see this in the log "STOP_HOOK decision=allow reason=passed" - what does that mean?? 
-- clearly log every decision the stop hook makes: whether to invoke executeRun() or not (and why), what the stop "decision" is and why. I need really clear transparency on this so i can figure out if the stop hook is working or not.
-
-enhance other logs
-- include diff stats - what was the base ref (branch or commit or uncommitted or worktree ref), number of files in the diff (can we break this down by new / modified / deleted?), total size of diff (again how to break this down - lines added and removed?)
-- It seems the log file numberings are not working correctly, i often see
--- review log 2 (and higher) but no log 1 or json file for same reviewer. Is something deleting (or never generating in the first place) the .1 files?
--- last console log is often "1" even though 2 or more iterations ran and last log files for the check and review are 2 or higher, and console.1.log references other log files with higher number. why is this the case?
-
--------
 
 print log reviewer token usage in log - if this is possible
 

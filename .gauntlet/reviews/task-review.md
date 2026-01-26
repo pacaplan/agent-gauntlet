@@ -1,6 +1,6 @@
 ---
 num_reviews: 1
-reviewers:
+cli_preference:
   - codex
   - gemini
   - claude
