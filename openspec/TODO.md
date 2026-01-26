@@ -1,25 +1,23 @@
 
 
-update task generation validation criteria to say to look for agent-gauntlet and do what it says
 
 ------------------------------------------------------------
 
 enhance debug  logger
-- diff stats - number of files, total size of diff (lines added and removed?)
-- include branch on every message
-- i see this in the log "STOP_HOOK decision=allow reason=passed" - what does that mean?? there are many reasons the stop could be approved, include the specific reason. 
+- log the branch name on every message
+- log the complete RunResult at end of every executeRun()
+- i see this in the log "STOP_HOOK decision=allow reason=passed" - what does that mean?? 
+- clearly log every decision the stop hook makes: whether to invoke executeRun() or not (and why), what the stop "decision" is and why. I need really clear transparency on this so i can figure out if the stop hook is working or not.
 
-enhance console log
-- print log reviewer token usage in log - if this is possible
-- older log files are often deleted i often seen
--- review log 2 (and higher) but no log 1 or json file for same reviewer
--- last console log is 1 in that case even though 2 or more iterations ran. console.1.log contains the log output for some higher iteration number
-- when `run` doesn't detect any changes, it needs to be considered success case and *clean the that log file*, example:
-"Existing logs detected — running in verification mode...
-Detecting changes...
-Found 1 changed files.
-No applicable gates for these changes."
+enhance other logs
+- include diff stats - what was the base ref (branch or commit or uncommitted or worktree ref), number of files in the diff (can we break this down by new / modified / deleted?), total size of diff (again how to break this down - lines added and removed?)
+- It seems the log file numberings are not working correctly, i often see
+-- review log 2 (and higher) but no log 1 or json file for same reviewer. Is something deleting (or never generating in the first place) the .1 files?
+-- last console log is often "1" even though 2 or more iterations ran and last log files for the check and review are 2 or higher, and console.1.log references other log files with higher number. why is this the case?
 
+-------
+
+print log reviewer token usage in log - if this is possible
 
 
 Clean up json files

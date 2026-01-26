@@ -210,10 +210,10 @@ If multiple capabilities are affected, create multiple delta files under `change
 
 **Test coverage rule:** Include at least one test (unit or integration) for each scenario in the spec. This ensures all specified behaviors are verified.
 
-Always include a final validation section in `tasks.md` Example:
+Always include the following as the final validation instructions in `tasks.md` Example:
 ```markdown
 ## 8. Validation
-- [] Dogfood: run the full gauntlet via `.claude/commands/dogfood.md` steps and fix all issues
+There are no validation tasks that need to be explicitly run. When work is completed, a stop hook should execute the full gauntlet of verification tasks and give direction on what needs to be fixed.
 ```
 **Do not** include linting, tests, build, etc in the validation; the gauntlet suite runs all of this.
 
