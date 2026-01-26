@@ -167,6 +167,9 @@ export class ReviewGateExecutor {
 		};
 
 		try {
+			console.log(
+				`[ReviewGate] Starting review: ${config.name} | entry=${entryPointPath}`,
+			);
 			await mainLogger(`Starting review: ${config.name}\n`);
 			await mainLogger(`Entry point: ${entryPointPath}\n`);
 			await mainLogger(`Base branch: ${baseBranch}\n`);
@@ -176,7 +179,11 @@ export class ReviewGateExecutor {
 				baseBranch,
 				changeOptions,
 			);
+			console.log(
+				`[ReviewGate] getDiff returned ${diff.length} chars, ${diff.split("\n").length} lines`,
+			);
 			if (!diff.trim()) {
+				console.log(`[ReviewGate] Empty diff after trim, returning pass`);
 				await mainLogger("No changes found in entry point, skipping review.\n");
 				await mainLogger("Result: pass - No changes to review\n");
 				return {
@@ -205,6 +212,9 @@ export class ReviewGateExecutor {
 
 			const preferences = config.cli_preference || [];
 			const parallel = config.parallel ?? false;
+			console.log(
+				`[ReviewGate] Checking adapters: ${preferences.join(", ") || "(none configured)"}`,
+			);
 
 			// Determine healthy adapters
 			const healthyAdapters: string[] = [];
@@ -218,10 +228,14 @@ export class ReviewGateExecutor {
 				} else {
 					const adapter = getAdapter(toolName);
 					if (!adapter) {
+						console.log(`[ReviewGate] Adapter ${toolName}: not found`);
 						isHealthy = false;
 					} else {
 						const health = await adapter.checkHealth({ checkUsageLimit });
 						isHealthy = health.status === "healthy";
+						console.log(
+							`[ReviewGate] Adapter ${toolName}: ${health.status}${health.message ? ` - ${health.message}` : ""}`,
+						);
 						if (!isHealthy) {
 							await mainLogger(
 								`Skipping ${toolName}: ${health.message || "Unhealthy"}\n`,
@@ -237,6 +251,7 @@ export class ReviewGateExecutor {
 
 			if (healthyAdapters.length === 0) {
 				const msg = "Review dispatch failed: no healthy adapters available";
+				console.log(`[ReviewGate] ERROR: ${msg}`);
 				await mainLogger(`Result: error - ${msg}\n`);
 				return {
 					jobId,
@@ -246,6 +261,9 @@ export class ReviewGateExecutor {
 					logPaths,
 				};
 			}
+			console.log(
+				`[ReviewGate] Healthy adapters: ${healthyAdapters.join(", ")}`,
+			);
 
 			// Round-robin assignment over healthy adapters
 			const assignments: Array<{
@@ -313,13 +331,16 @@ export class ReviewGateExecutor {
 				}
 			}
 
-			await mainLogger(
-				`Dispatching ${required} review(s) via round-robin: ${assignments.map((a) => `${a.adapter}@${a.reviewIndex}`).join(", ")}\n`,
-			);
+			const dispatchMsg = `Dispatching ${required} review(s) via round-robin: ${assignments.map((a) => `${a.adapter}@${a.reviewIndex}`).join(", ")}`;
+			console.log(`[ReviewGate] ${dispatchMsg}`);
+			await mainLogger(`${dispatchMsg}\n`);
 
 			// Separate assignments into running and skipped
 			const runningAssignments = assignments.filter((a) => !a.skip);
 			const skippedAssignments = assignments.filter((a) => a.skip);
+			console.log(
+				`[ReviewGate] Running: ${runningAssignments.length}, Skipped: ${skippedAssignments.length}`,
+			);
 
 			// Track skipped slots for output
 			const skippedSlotOutputs: Array<{
@@ -516,6 +537,7 @@ export class ReviewGateExecutor {
 				return aIndex - bIndex;
 			});
 
+			console.log(`[ReviewGate] Complete: ${status} - ${message}`);
 			await mainLogger(`Result: ${status} - ${message}\n`);
 
 			return {
@@ -528,14 +550,18 @@ export class ReviewGateExecutor {
 				skipped: allSkipped,
 			};
 		} catch (error: unknown) {
-			const err = error as { message?: string };
-			await mainLogger(`Critical Error: ${err.message}\n`);
+			const err = error as { message?: string; stack?: string };
+			const errMsg = err.message || "Unknown error";
+			const errStack = err.stack || "";
+			// nosemgrep: javascript.lang.security.audit.unsafe-formatstring.unsafe-formatstring
+			console.error("[ReviewGate] CRITICAL ERROR:", errMsg, errStack);
+			await mainLogger(`Critical Error: ${errMsg}\n`);
 			await mainLogger("Result: error\n");
 			return {
 				jobId,
 				status: "error",
 				duration: Date.now() - startTime,
-				message: err.message,
+				message: errMsg,
 				logPaths,
 			};
 		}
@@ -774,6 +800,7 @@ export class ReviewGateExecutor {
 		} catch (error: unknown) {
 			const err = error as { message?: string };
 			const errorMsg = `Error running ${adapter.name}@${reviewIndex}: ${err.message}`;
+			console.error(`[ReviewGate] ${errorMsg}`);
 			await adapterLogger(`${errorMsg}\n`);
 			await mainLogger(`${errorMsg}\n`);
 			return null;
