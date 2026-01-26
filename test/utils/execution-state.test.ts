@@ -1,8 +1,8 @@
-import { afterEach, beforeEach, describe, expect, it } from "bun:test";
-import { exec } from "node:child_process";
+import { afterEach, beforeEach, describe, expect, it, mock, spyOn } from "bun:test";
+import * as childProcess from "node:child_process";
+import { EventEmitter } from "node:events";
 import fs from "node:fs/promises";
 import path from "node:path";
-import { promisify } from "node:util";
 import {
 	createWorkingTreeRef,
 	deleteExecutionState,
@@ -16,8 +16,27 @@ import {
 	writeExecutionState,
 } from "../../src/utils/execution-state.js";
 
-const execAsync = promisify(exec);
 const TEST_DIR = path.join(import.meta.dir, "../../.test-execution-state");
+
+// Helper to create a mock spawn process
+function createMockSpawn(stdout: string, exitCode: number) {
+	const mockProcess = new EventEmitter() as EventEmitter & {
+		stdout: EventEmitter;
+		stderr: EventEmitter;
+	};
+	mockProcess.stdout = new EventEmitter();
+	mockProcess.stderr = new EventEmitter();
+
+	// Schedule the events to fire asynchronously
+	setImmediate(() => {
+		if (stdout) {
+			mockProcess.stdout.emit("data", Buffer.from(stdout));
+		}
+		mockProcess.emit("close", exitCode);
+	});
+
+	return mockProcess;
+}
 
 describe("Execution State Utilities", () => {
 	beforeEach(async () => {
@@ -27,6 +46,7 @@ describe("Execution State Utilities", () => {
 
 	afterEach(async () => {
 		await fs.rm(TEST_DIR, { recursive: true, force: true });
+		mock.restore();
 	});
 
 	describe("getExecutionStateFilename", () => {
@@ -63,6 +83,22 @@ describe("Execution State Utilities", () => {
 			expect(result).toEqual(state);
 		});
 
+		it("returns state with working_tree_ref when present", async () => {
+			const state = {
+				last_run_completed_at: "2026-01-25T12:00:00.000Z",
+				branch: "feature-branch",
+				commit: "abc123def456",
+				working_tree_ref: "stash123sha456",
+			};
+			await fs.writeFile(
+				path.join(TEST_DIR, ".execution_state"),
+				JSON.stringify(state),
+			);
+
+			const result = await readExecutionState(TEST_DIR);
+			expect(result).toEqual(state);
+		});
+
 		it("returns null on invalid JSON", async () => {
 			await fs.writeFile(
 				path.join(TEST_DIR, ".execution_state"),
@@ -72,22 +108,28 @@ describe("Execution State Utilities", () => {
 			const result = await readExecutionState(TEST_DIR);
 			expect(result).toBeNull();
 		});
+
+		it("returns null when required fields are missing", async () => {
+			await fs.writeFile(
+				path.join(TEST_DIR, ".execution_state"),
+				JSON.stringify({ branch: "test" }), // missing last_run_completed_at and commit
+			);
+
+			const result = await readExecutionState(TEST_DIR);
+			expect(result).toBeNull();
+		});
 	});
 
 	describe("deleteExecutionState", () => {
 		it("removes execution state file when it exists", async () => {
-			// Create state file
 			const statePath = path.join(TEST_DIR, ".execution_state");
 			await fs.writeFile(statePath, JSON.stringify({ branch: "test" }));
 
-			// Verify it exists
 			const statBefore = await fs.stat(statePath);
 			expect(statBefore.isFile()).toBe(true);
 
-			// Delete it
 			await deleteExecutionState(TEST_DIR);
 
-			// Verify it's gone
 			try {
 				await fs.stat(statePath);
 				expect(true).toBe(false); // Should not reach
@@ -97,234 +139,430 @@ describe("Execution State Utilities", () => {
 		});
 
 		it("does not throw when file does not exist", async () => {
-			// Should not throw
 			await deleteExecutionState(path.join(TEST_DIR, "nonexistent"));
 		});
 	});
 });
 
-// Tests that require a git repo - create an isolated one
-describe("Execution State Git Operations", () => {
-	let originalCwd: string;
-	const GIT_TEST_DIR = path.join(
-		import.meta.dir,
-		"../../.test-execution-state-git",
-	);
+describe("Execution State Git Operations (mocked)", () => {
+	let spawnSpy: ReturnType<typeof spyOn>;
 
 	beforeEach(async () => {
-		originalCwd = process.cwd();
-
-		// Clean up and create test directory
-		await fs.rm(GIT_TEST_DIR, { recursive: true, force: true });
-		await fs.mkdir(GIT_TEST_DIR, { recursive: true });
-
-		// Change to test directory
-		process.chdir(GIT_TEST_DIR);
-
-		// Initialize a minimal git repo with a branch
-		await fs.writeFile("test.txt", "initial content");
-		await execAsync(
-			'git init && git config user.email "test@test.com" && git config user.name "Test" && git add -A && git commit -m "initial" && git branch -M main',
-		);
+		await fs.rm(TEST_DIR, { recursive: true, force: true });
+		await fs.mkdir(TEST_DIR, { recursive: true });
 	});
 
 	afterEach(async () => {
-		// Restore original working directory
-		process.chdir(originalCwd);
-		await fs.rm(GIT_TEST_DIR, { recursive: true, force: true });
+		await fs.rm(TEST_DIR, { recursive: true, force: true });
+		mock.restore();
 	});
 
 	describe("getCurrentBranch", () => {
 		it("returns current git branch name", async () => {
+			spawnSpy = spyOn(childProcess, "spawn").mockImplementation(() => {
+				return createMockSpawn("main\n", 0) as ReturnType<
+					typeof childProcess.spawn
+				>;
+			});
+
 			const branch = await getCurrentBranch();
 			expect(branch).toBe("main");
+			expect(spawnSpy).toHaveBeenCalledWith(
+				"git",
+				["rev-parse", "--abbrev-ref", "HEAD"],
+				expect.any(Object),
+			);
+		});
+
+		it("rejects when git command fails", async () => {
+			spawnSpy = spyOn(childProcess, "spawn").mockImplementation(() => {
+				return createMockSpawn("", 128) as ReturnType<
+					typeof childProcess.spawn
+				>;
+			});
+
+			await expect(getCurrentBranch()).rejects.toThrow(
+				"git rev-parse failed with code 128",
+			);
 		});
 	});
 
 	describe("getCurrentCommit", () => {
 		it("returns current HEAD commit SHA", async () => {
+			const mockSha = "abc123def456789012345678901234567890abcd";
+			spawnSpy = spyOn(childProcess, "spawn").mockImplementation(() => {
+				return createMockSpawn(`${mockSha}\n`, 0) as ReturnType<
+					typeof childProcess.spawn
+				>;
+			});
+
 			const commit = await getCurrentCommit();
-			expect(typeof commit).toBe("string");
-			// SHA should be 40 characters
-			expect(commit).toMatch(/^[a-f0-9]{40}$/);
+			expect(commit).toBe(mockSha);
+			expect(spawnSpy).toHaveBeenCalledWith(
+				"git",
+				["rev-parse", "HEAD"],
+				expect.any(Object),
+			);
+		});
+
+		it("rejects when git command fails", async () => {
+			spawnSpy = spyOn(childProcess, "spawn").mockImplementation(() => {
+				return createMockSpawn("", 128) as ReturnType<
+					typeof childProcess.spawn
+				>;
+			});
+
+			await expect(getCurrentCommit()).rejects.toThrow(
+				"git rev-parse failed with code 128",
+			);
 		});
 	});
 
 	describe("isCommitInBranch", () => {
-		it("returns true for commits in current branch", async () => {
-			const commit = await getCurrentCommit();
-			const result = await isCommitInBranch(commit, "main");
+		it("returns true when commit is ancestor of branch", async () => {
+			spawnSpy = spyOn(childProcess, "spawn").mockImplementation(() => {
+				return createMockSpawn("", 0) as ReturnType<typeof childProcess.spawn>;
+			});
+
+			const result = await isCommitInBranch("abc123", "main");
 			expect(result).toBe(true);
+			expect(spawnSpy).toHaveBeenCalledWith(
+				"git",
+				["merge-base", "--is-ancestor", "abc123", "main"],
+				expect.any(Object),
+			);
 		});
 
-		it("returns false for non-existent commits", async () => {
-			const result = await isCommitInBranch("nonexistent123", "main");
+		it("returns false when commit is not ancestor", async () => {
+			spawnSpy = spyOn(childProcess, "spawn").mockImplementation(() => {
+				return createMockSpawn("", 1) as ReturnType<typeof childProcess.spawn>;
+			});
+
+			const result = await isCommitInBranch("abc123", "main");
+			expect(result).toBe(false);
+		});
+
+		it("returns false on error", async () => {
+			spawnSpy = spyOn(childProcess, "spawn").mockImplementation(() => {
+				const mockProcess = new EventEmitter() as EventEmitter & {
+					stdout: EventEmitter;
+					stderr: EventEmitter;
+				};
+				mockProcess.stdout = new EventEmitter();
+				mockProcess.stderr = new EventEmitter();
+				setImmediate(() => {
+					mockProcess.emit("error", new Error("spawn failed"));
+				});
+				return mockProcess as ReturnType<typeof childProcess.spawn>;
+			});
+
+			const result = await isCommitInBranch("abc123", "main");
 			expect(result).toBe(false);
 		});
 	});
 
-	describe("createWorkingTreeRef", () => {
-		it("returns HEAD SHA when working tree is clean", async () => {
-			const ref = await createWorkingTreeRef();
-			const head = await getCurrentCommit();
-			// Clean working tree returns HEAD
-			expect(ref).toBe(head);
+	describe("gitObjectExists", () => {
+		it("returns true when object exists", async () => {
+			spawnSpy = spyOn(childProcess, "spawn").mockImplementation(() => {
+				return createMockSpawn("commit\n", 0) as ReturnType<
+					typeof childProcess.spawn
+				>;
+			});
+
+			const exists = await gitObjectExists("abc123");
+			expect(exists).toBe(true);
+			expect(spawnSpy).toHaveBeenCalledWith(
+				"git",
+				["cat-file", "-t", "abc123"],
+				expect.any(Object),
+			);
 		});
 
-		it("returns a stash SHA when working tree is dirty", async () => {
-			// Make uncommitted changes
-			await fs.writeFile("test.txt", "modified content");
+		it("returns false when object does not exist", async () => {
+			spawnSpy = spyOn(childProcess, "spawn").mockImplementation(() => {
+				return createMockSpawn("", 128) as ReturnType<
+					typeof childProcess.spawn
+				>;
+			});
 
-			const ref = await createWorkingTreeRef();
-			const head = await getCurrentCommit();
+			const exists = await gitObjectExists("nonexistent");
+			expect(exists).toBe(false);
+		});
 
-			// Dirty working tree returns a stash SHA (different from HEAD)
-			expect(ref).toMatch(/^[a-f0-9]{40}$/);
-			expect(ref).not.toBe(head);
+		it("returns false on error", async () => {
+			spawnSpy = spyOn(childProcess, "spawn").mockImplementation(() => {
+				const mockProcess = new EventEmitter() as EventEmitter & {
+					stdout: EventEmitter;
+					stderr: EventEmitter;
+				};
+				mockProcess.stdout = new EventEmitter();
+				mockProcess.stderr = new EventEmitter();
+				setImmediate(() => {
+					mockProcess.emit("error", new Error("spawn failed"));
+				});
+				return mockProcess as ReturnType<typeof childProcess.spawn>;
+			});
+
+			const exists = await gitObjectExists("abc123");
+			expect(exists).toBe(false);
 		});
 	});
 
-	describe("gitObjectExists", () => {
-		it("returns true for existing commit", async () => {
-			const commit = await getCurrentCommit();
-			const exists = await gitObjectExists(commit);
-			expect(exists).toBe(true);
-		});
+	describe("createWorkingTreeRef", () => {
+		it("returns stash SHA when working tree is dirty", async () => {
+			const stashSha = "stash123456789012345678901234567890abcd";
+			spawnSpy = spyOn(childProcess, "spawn").mockImplementation(() => {
+				return createMockSpawn(`${stashSha}\n`, 0) as ReturnType<
+					typeof childProcess.spawn
+				>;
+			});
 
-		it("returns false for non-existent SHA", async () => {
-			const exists = await gitObjectExists(
-				"0000000000000000000000000000000000000000",
+			const ref = await createWorkingTreeRef();
+			expect(ref).toBe(stashSha);
+			expect(spawnSpy).toHaveBeenCalledWith(
+				"git",
+				["stash", "create", "--include-untracked"],
+				expect.any(Object),
 			);
-			expect(exists).toBe(false);
 		});
 
-		it("returns false for invalid SHA format", async () => {
-			const exists = await gitObjectExists("not-a-valid-sha");
-			expect(exists).toBe(false);
+		it("returns HEAD SHA when working tree is clean", async () => {
+			const headSha = "head1234567890123456789012345678901234ab";
+			let callCount = 0;
+			spawnSpy = spyOn(childProcess, "spawn").mockImplementation(
+				(cmd, args) => {
+					callCount++;
+					if (callCount === 1) {
+						// First call: git stash create returns empty (clean tree)
+						return createMockSpawn("", 0) as ReturnType<
+							typeof childProcess.spawn
+						>;
+					}
+					// Second call: git rev-parse HEAD
+					return createMockSpawn(`${headSha}\n`, 0) as ReturnType<
+						typeof childProcess.spawn
+					>;
+				},
+			);
+
+			const ref = await createWorkingTreeRef();
+			expect(ref).toBe(headSha);
 		});
 	});
 
 	describe("writeExecutionState", () => {
 		it("creates state file with correct content", async () => {
-			const logDir = path.join(GIT_TEST_DIR, "logs");
-			await fs.mkdir(logDir, { recursive: true });
+			const mockBranch = "feature-branch";
+			const mockCommit = "commit123456789012345678901234567890ab";
+			const mockStash = "stash1234567890123456789012345678901234";
 
-			await writeExecutionState(logDir);
+			let callCount = 0;
+			spawnSpy = spyOn(childProcess, "spawn").mockImplementation(
+				(cmd, args) => {
+					callCount++;
+					const argsArray = args as string[];
+					if (argsArray.includes("--abbrev-ref")) {
+						return createMockSpawn(`${mockBranch}\n`, 0) as ReturnType<
+							typeof childProcess.spawn
+						>;
+					}
+					if (argsArray.includes("stash")) {
+						return createMockSpawn(`${mockStash}\n`, 0) as ReturnType<
+							typeof childProcess.spawn
+						>;
+					}
+					// rev-parse HEAD
+					return createMockSpawn(`${mockCommit}\n`, 0) as ReturnType<
+						typeof childProcess.spawn
+					>;
+				},
+			);
+
+			await writeExecutionState(TEST_DIR);
 
 			const content = await fs.readFile(
-				path.join(logDir, ".execution_state"),
+				path.join(TEST_DIR, ".execution_state"),
 				"utf-8",
 			);
 			const state = JSON.parse(content);
 
+			expect(state.branch).toBe(mockBranch);
+			expect(state.commit).toBe(mockCommit);
+			expect(state.working_tree_ref).toBe(mockStash);
 			expect(state).toHaveProperty("last_run_completed_at");
-			expect(state).toHaveProperty("branch");
-			expect(state).toHaveProperty("commit");
-			expect(state).toHaveProperty("working_tree_ref");
-
-			expect(state.branch).toBe("main");
-			expect(state.commit).toMatch(/^[a-f0-9]{40}$/);
-			expect(state.working_tree_ref).toMatch(/^[a-f0-9]{40}$/);
-
-			// Validate ISO timestamp format
 			expect(new Date(state.last_run_completed_at).toISOString()).toBe(
 				state.last_run_completed_at,
 			);
 		});
 
-		it("overwrites existing state file", async () => {
-			const logDir = path.join(GIT_TEST_DIR, "logs");
-			await fs.mkdir(logDir, { recursive: true });
+		it("removes legacy .session_ref file", async () => {
+			const sessionRefPath = path.join(TEST_DIR, ".session_ref");
+			await fs.writeFile(sessionRefPath, "old-session-ref");
 
-			const oldState = {
-				last_run_completed_at: "2020-01-01T00:00:00.000Z",
-				branch: "old-branch",
-				commit: "oldcommit",
-			};
-			await fs.writeFile(
-				path.join(logDir, ".execution_state"),
-				JSON.stringify(oldState),
-			);
+			spawnSpy = spyOn(childProcess, "spawn").mockImplementation(() => {
+				return createMockSpawn("mock-value\n", 0) as ReturnType<
+					typeof childProcess.spawn
+				>;
+			});
 
-			await writeExecutionState(logDir);
+			await writeExecutionState(TEST_DIR);
 
-			const content = await fs.readFile(
-				path.join(logDir, ".execution_state"),
-				"utf-8",
-			);
-			const state = JSON.parse(content);
-
-			// Should be different from old state
-			expect(state.branch).toBe("main");
-			expect(state.commit).not.toBe("oldcommit");
+			// .session_ref should be deleted
+			try {
+				await fs.stat(sessionRefPath);
+				expect(true).toBe(false); // Should not reach
+			} catch (e: unknown) {
+				expect((e as { code: string }).code).toBe("ENOENT");
+			}
 		});
 	});
 
 	describe("resolveFixBase", () => {
 		it("returns null when commit is merged into base branch", async () => {
-			const commit = await getCurrentCommit();
-			const state = {
-				last_run_completed_at: new Date().toISOString(),
-				branch: "test-branch",
-				commit,
-				working_tree_ref: commit,
-			};
+			// isCommitInBranch returns true (merged)
+			spawnSpy = spyOn(childProcess, "spawn").mockImplementation(() => {
+				return createMockSpawn("", 0) as ReturnType<typeof childProcess.spawn>;
+			});
 
-			// commit is in main, so state is stale
-			const result = await resolveFixBase(state, "main");
-			expect(result.fixBase).toBeNull();
-		});
-
-		it("returns working_tree_ref when valid and commit not merged", async () => {
-			// Create a feature branch with a new commit
-			await execAsync("git checkout -b feature");
-			await fs.writeFile("feature.txt", "feature content");
-			await execAsync('git add -A && git commit -m "feature commit"');
-
-			const commit = await getCurrentCommit();
-			const workingTreeRef = await createWorkingTreeRef();
 			const state = {
 				last_run_completed_at: new Date().toISOString(),
 				branch: "feature",
-				commit,
-				working_tree_ref: workingTreeRef,
+				commit: "abc123def456789012345678901234567890abcd",
+				working_tree_ref: "stash123456789012345678901234567890ab",
 			};
 
-			// commit is NOT in main (feature branch), so state is valid
 			const result = await resolveFixBase(state, "main");
-			expect(result.fixBase).toBe(workingTreeRef);
+			expect(result.fixBase).toBeNull();
+			expect(result.warning).toBeUndefined();
+		});
+
+		it("returns working_tree_ref when valid and commit not merged", async () => {
+			let callCount = 0;
+			spawnSpy = spyOn(childProcess, "spawn").mockImplementation(
+				(cmd, args) => {
+					callCount++;
+					const argsArray = args as string[];
+					if (argsArray.includes("--is-ancestor")) {
+						// Not merged
+						return createMockSpawn("", 1) as ReturnType<
+							typeof childProcess.spawn
+						>;
+					}
+					// cat-file: object exists
+					return createMockSpawn("commit\n", 0) as ReturnType<
+						typeof childProcess.spawn
+					>;
+				},
+			);
+
+			const state = {
+				last_run_completed_at: new Date().toISOString(),
+				branch: "feature",
+				commit: "abc123def456789012345678901234567890abcd",
+				working_tree_ref: "stash123456789012345678901234567890ab",
+			};
+
+			const result = await resolveFixBase(state, "main");
+			expect(result.fixBase).toBe(state.working_tree_ref);
 			expect(result.warning).toBeUndefined();
 		});
 
 		it("falls back to commit when working_tree_ref is gc'd", async () => {
-			// Create a feature branch
-			await execAsync("git checkout -b feature2");
-			await fs.writeFile("feature2.txt", "feature2 content");
-			await execAsync('git add -A && git commit -m "feature2 commit"');
+			let callCount = 0;
+			spawnSpy = spyOn(childProcess, "spawn").mockImplementation(
+				(cmd, args) => {
+					callCount++;
+					const argsArray = args as string[];
+					if (argsArray.includes("--is-ancestor")) {
+						// Not merged
+						return createMockSpawn("", 1) as ReturnType<
+							typeof childProcess.spawn
+						>;
+					}
+					if (callCount === 2) {
+						// First cat-file (working_tree_ref): not found
+						return createMockSpawn("", 128) as ReturnType<
+							typeof childProcess.spawn
+						>;
+					}
+					// Second cat-file (commit): exists
+					return createMockSpawn("commit\n", 0) as ReturnType<
+						typeof childProcess.spawn
+					>;
+				},
+			);
 
-			const commit = await getCurrentCommit();
 			const state = {
 				last_run_completed_at: new Date().toISOString(),
-				branch: "feature2",
-				commit,
-				working_tree_ref: "0000000000000000000000000000000000000000", // Non-existent
+				branch: "feature",
+				commit: "abc123def456789012345678901234567890abcd",
+				working_tree_ref: "stash123456789012345678901234567890ab",
 			};
 
 			const result = await resolveFixBase(state, "main");
-			expect(result.fixBase).toBe(commit);
+			expect(result.fixBase).toBe(state.commit);
 			expect(result.warning).toContain("garbage collected");
 		});
 
 		it("returns null when both refs are invalid", async () => {
+			let callCount = 0;
+			spawnSpy = spyOn(childProcess, "spawn").mockImplementation(
+				(cmd, args) => {
+					callCount++;
+					const argsArray = args as string[];
+					if (argsArray.includes("--is-ancestor")) {
+						// Not merged
+						return createMockSpawn("", 1) as ReturnType<
+							typeof childProcess.spawn
+						>;
+					}
+					// All cat-file calls: not found
+					return createMockSpawn("", 128) as ReturnType<
+						typeof childProcess.spawn
+					>;
+				},
+			);
+
 			const state = {
 				last_run_completed_at: new Date().toISOString(),
-				branch: "test-branch",
-				commit: "0000000000000000000000000000000000000000",
-				working_tree_ref: "1111111111111111111111111111111111111111",
+				branch: "feature",
+				commit: "abc123def456789012345678901234567890abcd",
+				working_tree_ref: "stash123456789012345678901234567890ab",
 			};
 
 			const result = await resolveFixBase(state, "main");
 			expect(result.fixBase).toBeNull();
+		});
+
+		it("handles missing working_tree_ref", async () => {
+			let callCount = 0;
+			spawnSpy = spyOn(childProcess, "spawn").mockImplementation(
+				(cmd, args) => {
+					callCount++;
+					const argsArray = args as string[];
+					if (argsArray.includes("--is-ancestor")) {
+						// Not merged
+						return createMockSpawn("", 1) as ReturnType<
+							typeof childProcess.spawn
+						>;
+					}
+					// cat-file (commit): exists
+					return createMockSpawn("commit\n", 0) as ReturnType<
+						typeof childProcess.spawn
+					>;
+				},
+			);
+
+			const state = {
+				last_run_completed_at: new Date().toISOString(),
+				branch: "feature",
+				commit: "abc123def456789012345678901234567890abcd",
+				// No working_tree_ref
+			};
+
+			const result = await resolveFixBase(state, "main");
+			expect(result.fixBase).toBe(state.commit);
+			expect(result.warning).toContain("garbage collected");
 		});
 	});
 });
