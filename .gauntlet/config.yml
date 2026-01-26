@@ -30,4 +30,4 @@ entry_points:
     checks:
       - openspec-validate
     reviews:
-      - change-review
+      - task-review
