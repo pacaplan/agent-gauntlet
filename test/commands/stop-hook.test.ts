@@ -30,7 +30,10 @@ const {
 	registerStopHookCommand,
 	getStopReasonInstructions,
 	findLatestConsoleLog,
+	outputHookResponse,
+	getStatusMessage,
 } = await import("../../src/commands/stop-hook.js");
+import type { StopHookStatus } from "../../src/commands/stop-hook.js";
 
 describe("Stop Hook Command", () => {
 	let program: Command;
@@ -544,6 +547,267 @@ describe("Stop Hook Command", () => {
 				.then(() => true)
 				.catch(() => false);
 			expect(stateExists).toBe(false);
+		});
+	});
+
+	describe("getStatusMessage", () => {
+		it("should return appropriate message for passed status", () => {
+			const message = getStatusMessage("passed");
+			expect(message).toBe("Gauntlet passed — all gates completed successfully.");
+		});
+
+		it("should return appropriate message for no_applicable_gates status", () => {
+			const message = getStatusMessage("no_applicable_gates");
+			expect(message).toBe(
+				"Gauntlet passed — no applicable gates matched current changes.",
+			);
+		});
+
+		it("should return appropriate message for termination_passed status", () => {
+			const message = getStatusMessage("termination_passed");
+			expect(message).toBe("Gauntlet completed — all gates passed.");
+		});
+
+		it("should return appropriate message for termination_warnings status", () => {
+			const message = getStatusMessage("termination_warnings");
+			expect(message).toBe(
+				"Gauntlet completed — passed with warnings (some issues were skipped).",
+			);
+		});
+
+		it("should return appropriate message for termination_retry_limit status", () => {
+			const message = getStatusMessage("termination_retry_limit");
+			expect(message).toContain("Gauntlet terminated");
+			expect(message).toContain("retry limit exceeded");
+			expect(message).toContain("agent-gauntlet clean");
+		});
+
+		it("should include interval minutes in interval_not_elapsed message", () => {
+			const message = getStatusMessage("interval_not_elapsed", {
+				intervalMinutes: 10,
+			});
+			expect(message).toContain("10 min");
+			expect(message).toContain("Gauntlet skipped");
+		});
+
+		it("should return default message for interval_not_elapsed without context", () => {
+			const message = getStatusMessage("interval_not_elapsed");
+			expect(message).toContain("Gauntlet skipped");
+			expect(message).toContain("run interval not elapsed");
+		});
+
+		it("should return appropriate message for lock_exists status", () => {
+			const message = getStatusMessage("lock_exists");
+			expect(message).toContain("Gauntlet skipped");
+			expect(message).toContain("already in progress");
+		});
+
+		it("should include error message in infrastructure_error message", () => {
+			const message = getStatusMessage("infrastructure_error", {
+				errorMessage: "Command not found",
+			});
+			expect(message).toContain("infrastructure error");
+			expect(message).toContain("Command not found");
+		});
+
+		it("should return default message for infrastructure_error without context", () => {
+			const message = getStatusMessage("infrastructure_error");
+			expect(message).toContain("infrastructure error");
+			expect(message).toContain("unable to execute");
+		});
+
+		it("should return appropriate message for failed status", () => {
+			const message = getStatusMessage("failed");
+			expect(message).toContain("Gauntlet failed");
+			expect(message).toContain("issues must be fixed");
+		});
+
+		it("should return appropriate message for no_config status", () => {
+			const message = getStatusMessage("no_config");
+			expect(message).toContain("Not a gauntlet project");
+			expect(message).toContain(".gauntlet/config.yml");
+		});
+
+		it("should return appropriate message for stop_hook_active status", () => {
+			const message = getStatusMessage("stop_hook_active");
+			expect(message).toContain("Stop hook cycle detected");
+			expect(message).toContain("infinite loop");
+		});
+
+		it("should include error message in error status message", () => {
+			const message = getStatusMessage("error", {
+				errorMessage: "Unexpected error occurred",
+			});
+			expect(message).toContain("Stop hook error");
+			expect(message).toContain("Unexpected error occurred");
+		});
+
+		it("should return default message for error without context", () => {
+			const message = getStatusMessage("error");
+			expect(message).toContain("Stop hook error");
+			expect(message).toContain("unexpected error");
+		});
+
+		it("should return appropriate message for invalid_input status", () => {
+			const message = getStatusMessage("invalid_input");
+			expect(message).toContain("Invalid hook input");
+			expect(message).toContain("could not parse JSON");
+		});
+	});
+
+	describe("outputHookResponse JSON format", () => {
+		it("should output JSON with status and message for passed status", () => {
+			outputHookResponse("passed");
+			expect(logs.length).toBe(1);
+			const response = JSON.parse(logs[0]);
+			expect(response.decision).toBe("approve");
+			expect(response.status).toBe("passed");
+			expect(response.message).toContain("Gauntlet passed");
+		});
+
+		it("should output JSON with status and message for no_applicable_gates status", () => {
+			outputHookResponse("no_applicable_gates");
+			expect(logs.length).toBe(1);
+			const response = JSON.parse(logs[0]);
+			expect(response.decision).toBe("approve");
+			expect(response.status).toBe("no_applicable_gates");
+			expect(response.message).toContain("no applicable gates");
+		});
+
+		it("should output JSON with status and message for termination_passed status", () => {
+			outputHookResponse("termination_passed");
+			expect(logs.length).toBe(1);
+			const response = JSON.parse(logs[0]);
+			expect(response.decision).toBe("approve");
+			expect(response.status).toBe("termination_passed");
+			expect(response.message).toContain("Gauntlet completed");
+		});
+
+		it("should output JSON with status and message for termination_warnings status", () => {
+			outputHookResponse("termination_warnings");
+			expect(logs.length).toBe(1);
+			const response = JSON.parse(logs[0]);
+			expect(response.decision).toBe("approve");
+			expect(response.status).toBe("termination_warnings");
+			expect(response.message).toContain("passed with warnings");
+		});
+
+		it("should output JSON with status and message for termination_retry_limit status", () => {
+			outputHookResponse("termination_retry_limit");
+			expect(logs.length).toBe(1);
+			const response = JSON.parse(logs[0]);
+			expect(response.decision).toBe("approve");
+			expect(response.status).toBe("termination_retry_limit");
+			expect(response.message).toContain("retry limit exceeded");
+		});
+
+		it("should output JSON with status and message for interval_not_elapsed status", () => {
+			outputHookResponse("interval_not_elapsed", { intervalMinutes: 10 });
+			expect(logs.length).toBe(1);
+			const response = JSON.parse(logs[0]);
+			expect(response.decision).toBe("approve");
+			expect(response.status).toBe("interval_not_elapsed");
+			expect(response.message).toContain("10 min");
+		});
+
+		it("should output JSON with status and message for lock_exists status", () => {
+			outputHookResponse("lock_exists");
+			expect(logs.length).toBe(1);
+			const response = JSON.parse(logs[0]);
+			expect(response.decision).toBe("approve");
+			expect(response.status).toBe("lock_exists");
+			expect(response.message).toContain("already in progress");
+		});
+
+		it("should output JSON with status and message for infrastructure_error status", () => {
+			outputHookResponse("infrastructure_error", {
+				errorMessage: "Command not found",
+			});
+			expect(logs.length).toBe(1);
+			const response = JSON.parse(logs[0]);
+			expect(response.decision).toBe("approve");
+			expect(response.status).toBe("infrastructure_error");
+			expect(response.message).toContain("Command not found");
+		});
+
+		it("should output JSON with decision=block for failed status", () => {
+			outputHookResponse("failed", { reason: "Fix the issues" });
+			expect(logs.length).toBe(1);
+			const response = JSON.parse(logs[0]);
+			expect(response.decision).toBe("block");
+			expect(response.status).toBe("failed");
+			expect(response.message).toContain("Gauntlet failed");
+			expect(response.reason).toBe("Fix the issues");
+		});
+
+		it("should output JSON with status and message for no_config status", () => {
+			outputHookResponse("no_config");
+			expect(logs.length).toBe(1);
+			const response = JSON.parse(logs[0]);
+			expect(response.decision).toBe("approve");
+			expect(response.status).toBe("no_config");
+			expect(response.message).toContain("Not a gauntlet project");
+		});
+
+		it("should output JSON with status and message for stop_hook_active status", () => {
+			outputHookResponse("stop_hook_active");
+			expect(logs.length).toBe(1);
+			const response = JSON.parse(logs[0]);
+			expect(response.decision).toBe("approve");
+			expect(response.status).toBe("stop_hook_active");
+			expect(response.message).toContain("Stop hook cycle");
+		});
+
+		it("should output JSON with status and message for error status", () => {
+			outputHookResponse("error", { errorMessage: "Something went wrong" });
+			expect(logs.length).toBe(1);
+			const response = JSON.parse(logs[0]);
+			expect(response.decision).toBe("approve");
+			expect(response.status).toBe("error");
+			expect(response.message).toContain("Something went wrong");
+		});
+
+		it("should output JSON with status and message for invalid_input status", () => {
+			outputHookResponse("invalid_input");
+			expect(logs.length).toBe(1);
+			const response = JSON.parse(logs[0]);
+			expect(response.decision).toBe("approve");
+			expect(response.status).toBe("invalid_input");
+			expect(response.message).toContain("Invalid hook input");
+		});
+
+		it("should only produce decision=block for failed status", () => {
+			const allStatuses: StopHookStatus[] = [
+				"passed",
+				"no_applicable_gates",
+				"termination_passed",
+				"termination_warnings",
+				"termination_retry_limit",
+				"interval_not_elapsed",
+				"lock_exists",
+				"infrastructure_error",
+				"failed",
+				"no_config",
+				"stop_hook_active",
+				"error",
+				"invalid_input",
+			];
+
+			for (const status of allStatuses) {
+				logs = []; // Clear logs for each test
+				outputHookResponse(status);
+				const response = JSON.parse(logs[0]);
+				if (status === "failed") {
+					expect(response.decision).toBe("block");
+				} else {
+					expect(response.decision).toBe("approve");
+				}
+			}
+		});
+
+		it("should output single-line JSON for all responses", () => {
+			outputHookResponse("passed");
+			expect(logs[0].includes("\n")).toBe(false);
 		});
 	});
 });
