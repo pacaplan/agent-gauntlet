@@ -99,27 +99,7 @@ beforeEach(() => {
 afterEach(() => {
   mock.restore();
 });
-```
-
-**Alternative: Create isolated git repositories (only when testing git integration)**
-
-Use this only when you specifically need to test the integration with real git:
-
-```typescript
-const TEST_DIR = path.join("/tmp", `test-${Date.now()}`);
-
-beforeEach(async () => {
-  await fs.mkdir(TEST_DIR, { recursive: true });
-  process.chdir(TEST_DIR);
-  await execAsync('git init && git config user.email "test@test.com" && git config user.name "Test"');
-  // Create initial commit
-});
-
-afterEach(async () => {
-  process.chdir(originalCwd);
-  await fs.rm(TEST_DIR, { recursive: true, force: true });
-});
-```
+``
 
 **Anti-patterns to avoid**:
 - ❌ Don't skip tests in CI - tests should run everywhere
