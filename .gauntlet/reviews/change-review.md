@@ -19,6 +19,7 @@ reviewers:
 ### 1. Proposal Review (The "Why" & "What")
 The proposal file lives at `openspec/changes/*/proposal.md`
 *   **Value Proposition:** Does the "Why" clearly justify the effort?
+*   **Alternatives Considered:** Were other possible solutions evaluated? Is there a simpler or better approach?
 *   **Solution Fit:** Is the "What" the right way to solve the problem? Does it fit the product vision?
 *   **Impact Analysis:** Are the listed affected changes complete?
 
