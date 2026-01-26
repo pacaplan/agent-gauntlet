@@ -134,7 +134,8 @@ export async function hasExistingLogs(logDir: string): Promise<boolean> {
 			(f) =>
 				(f.endsWith(".log") || f.endsWith(".json")) &&
 				f !== "previous" &&
-				!f.startsWith("console."),
+				!f.startsWith("console.") &&
+				!f.startsWith("."),
 		);
 	} catch {
 		return false;
