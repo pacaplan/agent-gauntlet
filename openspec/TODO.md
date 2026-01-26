@@ -1,17 +1,25 @@
-return back different response from hook if successful vs if max retries reached vs if failures
 
-also different response if skipping execution due to time interval
 
 update task generation validation criteria to say to look for agent-gauntlet and do what it says
 
-enhance logger
-- diff stats - number of files, total size of diff (lines added and removed?)
-- include branch on every message
-
-
 ------------------------------------------------------------
 
-print log reviewer token usage in log
+enhance debug  logger
+- diff stats - number of files, total size of diff (lines added and removed?)
+- include branch on every message
+- i see this in the log "STOP_HOOK decision=allow reason=passed" - what does that mean?? there are many reasons the stop could be approved, include the specific reason. 
+
+enhance console log
+- print log reviewer token usage in log - if this is possible
+- older log files are often deleted i often seen
+-- review log 2 (and higher) but no log 1 or json file for same reviewer
+-- last console log is 1 in that case even though 2 or more iterations ran. console.1.log contains the log output for some higher iteration number
+- when `run` doesn't detect any changes, it needs to be considered success case and *clean the that log file*, example:
+"Existing logs detected — running in verification mode...
+Detecting changes...
+Found 1 changed files.
+No applicable gates for these changes."
+
 
 
 Clean up json files

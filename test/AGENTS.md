@@ -99,12 +99,7 @@ beforeEach(() => {
 afterEach(() => {
   mock.restore();
 });
-``
-
-**Anti-patterns to avoid**:
-- ❌ Don't skip tests in CI - tests should run everywhere
-- ❌ Don't run tests against the actual repo - CI uses shallow clones and detached HEAD
-- ❌ Don't use `delete process.env.CI` to "fix" tests - mock the underlying commands instead
+```
 
 ### 3. Environment Differences
 
@@ -182,3 +177,7 @@ bun test --verbose
 3. Follow the patterns above for mocking
 4. Ensure tests clean up after themselves
 5. Run tests locally AND verify they pass in CI before merging
+
+## Anti-patterns to avoid
+- ❌ Don't skip tests in CI - tests should run everywhere
+
