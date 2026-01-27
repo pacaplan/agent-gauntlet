@@ -34,10 +34,15 @@
   "scripts": {
     "build": "bun build --compile --minify --sourcemap ./src/index.ts --outfile bin/agent-gauntlet",
     "test": "bun test",
-    "lint": "biome check src"
+    "lint": "biome check src",
+    "changeset": "changeset",
+    "version": "changeset version",
+    "release": "npm publish"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.3.11",
+    "@changesets/changelog-github": "^0.5.2",
+    "@changesets/cli": "^2.29.8",
     "@types/bun": "latest"
   },
   "peerDependencies": {
