@@ -107,10 +107,16 @@ describe("stop-hook-config", () => {
 				expect(result.run_interval_minutes).toBeUndefined();
 			});
 
-			it("ignores float values (parses to integer)", () => {
+			it("ignores float values", () => {
 				process.env[GAUNTLET_STOP_HOOK_INTERVAL_MINUTES] = "10.5";
 				const result = parseStopHookEnvVars();
-				expect(result.run_interval_minutes).toBe(10);
+				expect(result.run_interval_minutes).toBeUndefined();
+			});
+
+			it("ignores partial numeric values like '10abc'", () => {
+				process.env[GAUNTLET_STOP_HOOK_INTERVAL_MINUTES] = "10abc";
+				const result = parseStopHookEnvVars();
+				expect(result.run_interval_minutes).toBeUndefined();
 			});
 		});
 	});
