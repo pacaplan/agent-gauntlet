@@ -42,8 +42,8 @@ export class EntryPointExpander {
 			// If no relevant files remain, skip this entry point
 			if (filteredChanges.length === 0) continue;
 
-			if (ep.path.endsWith("*")) {
-				// Wildcard directory (e.g., "engines/*")
+			if (ep.path.endsWith("*") && !ep.path.includes("**")) {
+				// Single-level wildcard directory (e.g., "engines/*")
 				const parentDir = ep.path.slice(0, -2); // "engines"
 				const expandedPaths = await this.expandWildcard(
 					parentDir,
@@ -53,6 +53,14 @@ export class EntryPointExpander {
 				for (const subDir of expandedPaths) {
 					results.push({
 						path: subDir,
+						config: ep,
+					});
+				}
+			} else if (this.isGlobPattern(ep.path)) {
+				// Glob pattern (e.g., "openspec/changes/**/tasks.md")
+				if (this.hasMatchingFiles(ep.path, filteredChanges)) {
+					results.push({
+						path: ep.path,
 						config: ep,
 					});
 				}
@@ -81,12 +89,17 @@ export class EntryPointExpander {
 				continue;
 			}
 
-			if (ep.path.endsWith("*")) {
+			if (ep.path.endsWith("*") && !ep.path.includes("**")) {
+				// Single-level wildcard directory (e.g., "engines/*")
 				const parentDir = ep.path.slice(0, -2);
 				const subDirs = await this.listSubDirectories(parentDir);
 				for (const subDir of subDirs) {
 					results.push({ path: subDir, config: ep });
 				}
+			} else if (this.isGlobPattern(ep.path)) {
+				// Glob pattern (e.g., "openspec/changes/**/tasks.md")
+				// Include as-is for expandAll since it's a virtual entry point
+				results.push({ path: ep.path, config: ep });
 			} else {
 				results.push({ path: ep.path, config: ep });
 			}
@@ -163,5 +176,15 @@ export class EntryPointExpander {
 		// Need to ensure exact match or subdirectory (e.g. "app" should not match "apple")
 		const dirPrefix = dirPath.endsWith("/") ? dirPath : `${dirPath}/`;
 		return changedFiles.some((f) => f === dirPath || f.startsWith(dirPrefix));
+	}
+
+	private isGlobPattern(pattern: string): boolean {
+		// Check if the pattern contains glob characters
+		return /[*?[{]/.test(pattern);
+	}
+
+	private hasMatchingFiles(pattern: string, changedFiles: string[]): boolean {
+		const glob = new Glob(pattern);
+		return changedFiles.some((file) => glob.match(file));
 	}
 }
