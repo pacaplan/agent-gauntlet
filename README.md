@@ -1,4 +1,4 @@
-# Agent Gauntlet
+<h1><img src="docs/images/logo.png" alt="Agent Gauntlet logo" width="750" align="absmiddle"></h1>
 
 [![CI](https://github.com/pacaplan/agent-gauntlet/actions/workflows/gauntlet.yml/badge.svg)](https://github.com/pacaplan/agent-gauntlet/actions/workflows/gauntlet.yml)
 [![npm](https://img.shields.io/npm/v/agent-gauntlet)](https://www.npmjs.com/package/agent-gauntlet)
