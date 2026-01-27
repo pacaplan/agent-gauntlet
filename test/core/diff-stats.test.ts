@@ -164,9 +164,7 @@ describe("computeDiffStats", () => {
 
 	describe("fixBase mode", () => {
 		it("uses fixBase ref for diff when provided", async () => {
-			// Get current HEAD as a valid ref
-			const { stdout } = await execAsync("git rev-parse HEAD");
-			const headRef = stdout.trim();
+			const headRef = "HEAD";
 
 			const result = await computeDiffStats("origin/main", {
 				fixBase: headRef,
@@ -219,9 +217,7 @@ describe("computeDiffStats", () => {
 		});
 
 		it("prioritizes fixBase over uncommitted option", async () => {
-			// When both fixBase and uncommitted are provided, fixBase should take precedence
-			const { stdout } = await execAsync("git rev-parse HEAD");
-			const headRef = stdout.trim();
+			const headRef = "HEAD";
 
 			const result = await computeDiffStats("origin/main", {
 				fixBase: headRef,
