@@ -2,43 +2,43 @@
 
 ## 1. Update Global Config Schema
 
-- [ ] Add `enabled: z.boolean().default(true)` to `stop_hook` schema in `src/config/global.ts`
-- [ ] Update `DEFAULT_GLOBAL_CONFIG` to include `enabled: true`
-- [ ] Verify backwards compatibility with existing configs
+- [x] Add `enabled: z.boolean().default(true)` to `stop_hook` schema in `src/config/global.ts`
+- [x] Update `DEFAULT_GLOBAL_CONFIG` to include `enabled: true`
+- [x] Verify backwards compatibility with existing configs
 
 ## 2. Update Project Config Schema
 
-- [ ] Add optional `stop_hook` section to `gauntletConfigSchema` in `src/config/schema.ts`
-- [ ] Define `stopHookConfigSchema` with optional `enabled` and `run_interval_minutes` fields
+- [x] Add optional `stop_hook` section to `gauntletConfigSchema` in `src/config/schema.ts`
+- [x] Define `stopHookConfigSchema` with optional `enabled` and `run_interval_minutes` fields
 
 ## 3. Create Config Resolver
 
-- [ ] Create `src/config/stop-hook-config.ts`
-- [ ] Define `StopHookConfig` type
-- [ ] Define environment variable constants (`GAUNTLET_STOP_HOOK_ENABLED`, `GAUNTLET_STOP_HOOK_INTERVAL_MINUTES`)
-- [ ] Implement `parseStopHookEnvVars()` with validation
-- [ ] Implement `resolveStopHookConfig(projectConfig?, globalConfig)` with precedence logic
+- [x] Create `src/config/stop-hook-config.ts`
+- [x] Define `StopHookConfig` type
+- [x] Define environment variable constants (`GAUNTLET_STOP_HOOK_ENABLED`, `GAUNTLET_STOP_HOOK_INTERVAL_MINUTES`)
+- [x] Implement `parseStopHookEnvVars()` with validation
+- [x] Implement `resolveStopHookConfig(projectConfig?, globalConfig)` with precedence logic
 
 ## 4. Add New Status Type
 
-- [ ] Add `stop_hook_disabled` to `GauntletStatus` type in `src/types/gauntlet-status.ts`
-- [ ] Update `getStatusMessage()` in `src/core/run-executor.ts`
+- [x] Add `stop_hook_disabled` to `GauntletStatus` type in `src/types/gauntlet-status.ts`
+- [x] Update `getStatusMessage()` in `src/core/run-executor.ts`
 
 ## 5. Update Run Executor
 
-- [ ] Import `resolveStopHookConfig` in `src/core/run-executor.ts`
-- [ ] Replace direct `globalConfig.stop_hook.run_interval_minutes` access with resolved config
-- [ ] Add early return for `enabled: false` case
-- [ ] Handle `interval: 0` as "always run" (skip interval check)
+- [x] Import `resolveStopHookConfig` in `src/core/run-executor.ts`
+- [x] Replace direct `globalConfig.stop_hook.run_interval_minutes` access with resolved config
+- [x] Add early return for `enabled: false` case
+- [x] Handle `interval: 0` as "always run" (skip interval check)
 
 ## 6. Testing
 
-- [ ] Test: Config precedence (env var > project > global) resolves correctly
-- [ ] Test: `enabled: false` skips gauntlet and returns `stop_hook_disabled` status
-- [ ] Test: `interval: 0` always runs without checking elapsed time
-- [ ] Test: Backwards compatibility — missing `enabled` field defaults to `true`
-- [ ] Test: Env var parsing accepts valid values and ignores invalid ones
-- [ ] Test: Interval check returns `interval_not_elapsed` when not elapsed
+- [x] Test: Config precedence (env var > project > global) resolves correctly
+- [x] Test: `enabled: false` skips gauntlet and returns `stop_hook_disabled` status
+- [x] Test: `interval: 0` always runs without checking elapsed time
+- [x] Test: Backwards compatibility — missing `enabled` field defaults to `true`
+- [x] Test: Env var parsing accepts valid values and ignores invalid ones
+- [x] Test: Interval check returns `interval_not_elapsed` when not elapsed
 
 ## Validation
 

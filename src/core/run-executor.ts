@@ -9,6 +9,7 @@ import {
 } from "../commands/shared.js";
 import { loadGlobalConfig } from "../config/global.js";
 import { loadConfig } from "../config/loader.js";
+import { resolveStopHookConfig } from "../config/stop-hook-config.js";
 import {
 	getCategoryLogger,
 	initLogger,
@@ -167,6 +168,8 @@ function getStatusMessage(status: GauntletStatus): string {
 			return "Run interval not elapsed.";
 		case "invalid_input":
 			return "Invalid input.";
+		case "stop_hook_disabled":
+			return "Stop hook is disabled via configuration.";
 	}
 }
 
@@ -225,10 +228,30 @@ export async function executeRun(
 		// Interval check: only stop-hook passes checkInterval: true
 		// CLI commands (run, check, review) always run immediately
 		if (options.checkInterval) {
+			// Resolve stop hook config from env > project > global
+			const stopHookConfig = resolveStopHookConfig(
+				config.project.stop_hook,
+				globalConfig,
+			);
+
+			// Check if stop hook is disabled
+			if (!stopHookConfig.enabled) {
+				log.debug("Stop hook is disabled via configuration, skipping");
+				// Clean up logger if we initialized it
+				if (loggerInitializedHere) {
+					await resetLogger();
+				}
+				return {
+					status: "stop_hook_disabled",
+					message: getStatusMessage("stop_hook_disabled"),
+				};
+			}
+
 			const logsExist = await hasExistingLogs(config.project.log_dir);
 			// Only check interval if there are no existing logs (not in rerun mode)
-			if (!logsExist) {
-				const intervalMinutes = globalConfig.stop_hook.run_interval_minutes;
+			// and interval > 0 (interval 0 means always run)
+			if (!logsExist && stopHookConfig.run_interval_minutes > 0) {
+				const intervalMinutes = stopHookConfig.run_interval_minutes;
 				const shouldRun = await shouldRunBasedOnInterval(
 					config.project.log_dir,
 					intervalMinutes,

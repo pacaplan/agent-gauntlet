@@ -62,6 +62,63 @@ describe("console-log.ts stderr capture", () => {
 	});
 });
 
+describe("run-executor stop hook config", () => {
+	describe("stop_hook_disabled status", () => {
+		it("should have stop_hook_disabled in getStatusMessage", () => {
+			const sourceFile = readFileSync(
+				join(process.cwd(), "src/core/run-executor.ts"),
+				"utf-8",
+			);
+
+			expect(sourceFile).toContain('"stop_hook_disabled"');
+			expect(sourceFile).toContain("Stop hook is disabled via configuration");
+		});
+
+		it("should import resolveStopHookConfig", () => {
+			const sourceFile = readFileSync(
+				join(process.cwd(), "src/core/run-executor.ts"),
+				"utf-8",
+			);
+
+			expect(sourceFile).toContain("resolveStopHookConfig");
+			expect(sourceFile).toContain("stop-hook-config");
+		});
+
+		it("should check enabled status before interval check", () => {
+			const sourceFile = readFileSync(
+				join(process.cwd(), "src/core/run-executor.ts"),
+				"utf-8",
+			);
+
+			// Should check stopHookConfig.enabled
+			expect(sourceFile).toContain("stopHookConfig.enabled");
+			expect(sourceFile).toContain("!stopHookConfig.enabled");
+		});
+
+		it("should return stop_hook_disabled when disabled", () => {
+			const sourceFile = readFileSync(
+				join(process.cwd(), "src/core/run-executor.ts"),
+				"utf-8",
+			);
+
+			// Should return stop_hook_disabled status
+			expect(sourceFile).toContain('status: "stop_hook_disabled"');
+		});
+	});
+
+	describe("interval zero means always run", () => {
+		it("should skip interval check when interval is 0", () => {
+			const sourceFile = readFileSync(
+				join(process.cwd(), "src/core/run-executor.ts"),
+				"utf-8",
+			);
+
+			// Should check if interval > 0 before checking elapsed time
+			expect(sourceFile).toContain("stopHookConfig.run_interval_minutes > 0");
+		});
+	});
+});
+
 describe("run-executor checkInterval option", () => {
 	describe("ExecuteRunOptions interface", () => {
 		it("should have checkInterval option in the interface", () => {
@@ -162,6 +219,17 @@ describe("run-executor checkInterval option", () => {
 			expect(sourceFile).toMatch(
 				/checkInterval[\s\S]*hasExistingLogs[\s\S]*!logsExist/,
 			);
+		});
+
+		it("should use resolveStopHookConfig for interval configuration", () => {
+			const sourceFile = readFileSync(
+				join(process.cwd(), "src/core/run-executor.ts"),
+				"utf-8",
+			);
+
+			// Should resolve config using the new resolver
+			expect(sourceFile).toContain("resolveStopHookConfig");
+			expect(sourceFile).toContain("config.project.stop_hook");
 		});
 	});
 
