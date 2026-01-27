@@ -6,7 +6,7 @@ import { reconstructHistory } from "../utils/log-parser.js";
 
 export class ConsoleReporter {
 	onJobStart(job: Job) {
-		console.log(chalk.blue(`[START] ${job.id}`));
+		console.error(chalk.blue(`[START] ${job.id}`));
 	}
 
 	onJobComplete(job: Job, result: GateResult) {
@@ -44,7 +44,7 @@ export class ConsoleReporter {
 					logInfo = `\n      ${logPrefix} ${displayLog}`;
 				}
 
-				console.log(
+				console.error(
 					statusColor(
 						`[${label}]  ${job.id} ${chalk.dim(sub.nameSuffix)} (${duration}) - ${sub.message}${logInfo}`,
 					),
@@ -62,13 +62,13 @@ export class ConsoleReporter {
 			}
 
 			if (result.status === "pass") {
-				console.log(chalk.green(`[PASS]  ${job.id} (${duration})`));
+				console.error(chalk.green(`[PASS]  ${job.id} (${duration})`));
 			} else if (result.status === "fail") {
-				console.log(
+				console.error(
 					chalk.red(`[FAIL]  ${job.id} (${duration}) - ${message}${logInfo}`),
 				);
 			} else {
-				console.log(
+				console.error(
 					chalk.magenta(
 						`[ERROR] ${job.id} (${duration}) - ${message}${logInfo}`,
 					),
@@ -82,11 +82,11 @@ export class ConsoleReporter {
 		logDir?: string,
 		statusOverride?: string,
 	) {
-		console.log(
+		console.error(
 			`\n${chalk.bold("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")}`,
 		);
-		console.log(chalk.bold("RESULTS SUMMARY"));
-		console.log(chalk.bold("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"));
+		console.error(chalk.bold("RESULTS SUMMARY"));
+		console.error(chalk.bold("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"));
 
 		if (logDir) {
 			try {
@@ -94,20 +94,20 @@ export class ConsoleReporter {
 				for (const iter of history) {
 					if (iter.fixed.length === 0 && iter.skipped.length === 0) continue;
 
-					console.log(`\nIteration ${iter.iteration}:`);
+					console.error(`\nIteration ${iter.iteration}:`);
 					for (const f of iter.fixed) {
 						const label = f.adapter ? `${f.jobId} (${f.adapter})` : f.jobId;
-						console.log(chalk.green(`  ✓ Fixed: ${label} - ${f.details}`));
+						console.error(chalk.green(`  ✓ Fixed: ${label} - ${f.details}`));
 					}
 					for (const s of iter.skipped) {
 						const label = s.adapter ? `${s.jobId} (${s.adapter})` : s.jobId;
-						console.log(
+						console.error(
 							chalk.yellow(
 								`  ⊘ Skipped: ${label} - ${s.file}:${s.line} ${s.issue}`,
 							),
 						);
 						if (s.result) {
-							console.log(chalk.dim(`    Reason: ${s.result}`));
+							console.error(chalk.dim(`    Reason: ${s.result}`));
 						}
 					}
 				}
@@ -134,12 +134,12 @@ export class ConsoleReporter {
 					}
 				}
 
-				console.log(
+				console.error(
 					`\n${chalk.bold("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")}`,
 				);
 				const iterationsText =
 					history.length > 1 ? ` after ${history.length} iterations` : "";
-				console.log(
+				console.error(
 					`Total: ${totalFixed} fixed, ${totalSkipped} skipped, ${totalFailed} failed${iterationsText}`,
 				);
 			} catch (err) {
@@ -170,8 +170,10 @@ export class ConsoleReporter {
 			statusColor = chalk.yellow;
 		}
 
-		console.log(statusColor(`Status: ${overallStatus}`));
-		console.log(chalk.bold("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"));
+		console.error(statusColor(`Status: ${overallStatus}`));
+		console.error(
+			chalk.bold("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"),
+		);
 	}
 
 	/** @internal Public for testing */

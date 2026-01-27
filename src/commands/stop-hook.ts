@@ -5,6 +5,11 @@ import YAML from "yaml";
 import { loadGlobalConfig } from "../config/global.js";
 import { executeRun } from "../core/run-executor.js";
 import {
+	getCategoryLogger,
+	initLogger,
+	resetLogger,
+} from "../output/app-logger.js";
+import {
 	type GauntletStatus,
 	isBlockingStatus,
 } from "../types/gauntlet-status.js";
@@ -286,12 +291,11 @@ function outputHookResponse(
 }
 
 /**
- * Log a message to stderr for verbose output.
- * Claude Code hooks expect stdout to contain only JSON responses,
- * so all logging must go to stderr.
+ * Get a logger for stop-hook operations.
+ * In stop-hook mode, this only writes to file (no console output).
  */
-function verboseLog(message: string): void {
-	console.error(`[gauntlet] ${message}`);
+function getStopHookLogger() {
+	return getCategoryLogger("stop-hook");
 }
 
 /**
@@ -356,8 +360,11 @@ export function registerStopHookCommand(program: Command): void {
 		.description("Claude Code stop hook - validates gauntlet completion")
 		.action(async () => {
 			let debugLogger: DebugLogger | null = null;
+			let loggerInitialized = false;
+			const log = getStopHookLogger();
+
 			try {
-				verboseLog("Starting gauntlet validation...");
+				log.info("Starting gauntlet validation...");
 
 				// 1. Read stdin JSON
 				const input = await readStdin();
@@ -369,14 +376,14 @@ export function registerStopHookCommand(program: Command): void {
 					}
 				} catch {
 					// Invalid JSON - allow stop to avoid blocking on parse errors
-					verboseLog("Invalid hook input, allowing stop");
+					log.info("Invalid hook input, allowing stop");
 					outputHookResponse("invalid_input");
 					return;
 				}
 
 				// 2. Check if already in stop hook cycle (infinite loop prevention)
 				if (hookInput.stop_hook_active) {
-					verboseLog("Stop hook already active, allowing stop");
+					log.info("Stop hook already active, allowing stop");
 					outputHookResponse("stop_hook_active");
 					return;
 				}
@@ -384,7 +391,7 @@ export function registerStopHookCommand(program: Command): void {
 				// 2b. Check if this is a child Claude process spawned by the gauntlet
 				// (indicated by environment variable set in CLI adapters)
 				if (process.env[GAUNTLET_STOP_HOOK_ACTIVE_ENV]) {
-					verboseLog(
+					log.info(
 						"Child Claude process detected (env var set), allowing stop",
 					);
 					outputHookResponse("stop_hook_active");
@@ -398,13 +405,20 @@ export function registerStopHookCommand(program: Command): void {
 				const configPath = path.join(projectCwd, ".gauntlet", "config.yml");
 				if (!(await fileExists(configPath))) {
 					// Not a gauntlet project - allow stop
-					verboseLog("No gauntlet config found, allowing stop");
+					log.info("No gauntlet config found, allowing stop");
 					outputHookResponse("no_config");
 					return;
 				}
 
 				// 5. Get log directory from project config
 				const logDir = path.join(projectCwd, await getLogDir(projectCwd));
+
+				// Initialize app logger in stop-hook mode (file-only, no console output)
+				await initLogger({
+					mode: "stop-hook",
+					logDir,
+				});
+				loggerInitialized = true;
 
 				// Initialize debug logger for stop-hook
 				const globalConfig = await loadGlobalConfig();
@@ -419,7 +433,7 @@ export function registerStopHookCommand(program: Command): void {
 				// 6. Lock pre-check: If lock file exists, another gauntlet is running
 				const lockPath = path.join(logDir, getLockFilename());
 				if (await fileExists(lockPath)) {
-					verboseLog(
+					log.info(
 						"Gauntlet already running (lock file exists), allowing stop",
 					);
 					await debugLogger.logStopHook("allow", "lock_conflict");
@@ -434,7 +448,7 @@ export function registerStopHookCommand(program: Command): void {
 				const intervalMinutes = globalConfig.stop_hook.run_interval_minutes;
 				if (!hasLogs) {
 					if (!(await shouldRunBasedOnInterval(logDir, intervalMinutes))) {
-						verboseLog(
+						log.info(
 							`Run interval (${intervalMinutes} min) not elapsed, allowing stop`,
 						);
 						await debugLogger.logStopHook("allow", "interval_not_elapsed");
@@ -442,15 +456,15 @@ export function registerStopHookCommand(program: Command): void {
 						return;
 					}
 				} else {
-					verboseLog("Existing log files found, rerun required");
+					log.info("Existing log files found, rerun required");
 				}
 
 				// 9. Run gauntlet using direct function invocation
-				verboseLog("Running gauntlet gates...");
+				log.info("Running gauntlet gates...");
 				const result = await executeRun({ cwd: projectCwd });
 
 				// 10. Handle results using unified GauntletStatus directly
-				verboseLog(`Gauntlet completed with status: ${result.status}`);
+				log.info(`Gauntlet completed with status: ${result.status}`);
 				await debugLogger.logStopHook(
 					isBlockingStatus(result.status) ? "block" : "allow",
 					result.status,
@@ -467,13 +481,23 @@ export function registerStopHookCommand(program: Command): void {
 							: undefined,
 					errorMessage: result.errorMessage,
 				});
+
+				// Clean up logger
+				if (loggerInitialized) {
+					await resetLogger();
+				}
 			} catch (error: unknown) {
 				// On any unexpected error, allow stop to avoid blocking indefinitely
 				const err = error as { message?: string };
 				const errorMessage = err.message || "unknown error";
-				console.error(`Stop hook error: ${errorMessage}`);
+				log.error(`Stop hook error: ${errorMessage}`);
 				await debugLogger?.logStopHook("allow", `error: ${errorMessage}`);
 				outputHookResponse("error", { errorMessage });
+
+				// Clean up logger
+				if (loggerInitialized) {
+					await resetLogger();
+				}
 			}
 		});
 }

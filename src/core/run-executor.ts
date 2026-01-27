@@ -1,6 +1,5 @@
 import fs from "node:fs/promises";
 import path from "node:path";
-import chalk from "chalk";
 import {
 	cleanLogs,
 	hasExistingLogs,
@@ -10,6 +9,12 @@ import {
 } from "../commands/shared.js";
 import { loadGlobalConfig } from "../config/global.js";
 import { loadConfig } from "../config/loader.js";
+import {
+	getCategoryLogger,
+	initLogger,
+	isLoggerConfigured,
+	resetLogger,
+} from "../output/app-logger.js";
 import { ConsoleReporter } from "../output/console.js";
 import {
 	type ConsoleLogHandle,
@@ -134,11 +139,10 @@ function getStatusMessage(status: GauntletStatus): string {
 }
 
 /**
- * Helper to log to console. Uses stderr to keep stdout clean for hook JSON responses.
- * Console.N.log files still capture stderr output via process.stderr.write interception.
+ * Get the run executor logger.
  */
-function log(...args: unknown[]): void {
-	console.error(...args);
+function getRunLogger() {
+	return getCategoryLogger("run");
 }
 
 /**
@@ -152,9 +156,20 @@ export async function executeRun(
 	let config: Awaited<ReturnType<typeof loadConfig>> | undefined;
 	let lockAcquired = false;
 	let consoleLogHandle: ConsoleLogHandle | undefined;
+	let loggerInitializedHere = false;
+	const log = getRunLogger();
 
 	try {
 		config = await loadConfig(cwd);
+
+		// Initialize app logger if not already configured (e.g., by stop-hook)
+		if (!isLoggerConfigured()) {
+			await initLogger({
+				mode: "interactive",
+				logDir: config.project.log_dir,
+			});
+			loggerInitializedHere = true;
+		}
 
 		// Initialize debug logger
 		const globalConfig = await loadGlobalConfig();
@@ -194,7 +209,7 @@ export async function executeRun(
 				effectiveBaseBranch,
 			);
 			if (autoCleanResult.clean) {
-				log(chalk.dim(`Auto-cleaning logs (${autoCleanResult.reason})...`));
+				log.debug(`Auto-cleaning logs (${autoCleanResult.reason})...`);
 				await debugLogger?.logClean(
 					"auto",
 					autoCleanResult.reason || "unknown",
@@ -227,9 +242,7 @@ export async function executeRun(
 		let passedSlotsMap: Map<string, Map<number, PassedSlot>> | undefined;
 
 		if (isRerun) {
-			log(
-				chalk.dim("Existing logs detected — running in verification mode..."),
-			);
+			log.debug("Existing logs detected — running in verification mode...");
 			const { failures: previousFailures, passedSlots } =
 				await findPreviousFailures(config.project.log_dir, options.gate, true);
 
@@ -252,10 +265,8 @@ export async function executeRun(
 						gf.adapterFailures.reduce((s, af) => s + af.violations.length, 0),
 					0,
 				);
-				log(
-					chalk.yellow(
-						`Found ${previousFailures.length} gate(s) with ${totalViolations} previous violation(s)`,
-					),
+				log.warn(
+					`Found ${previousFailures.length} gate(s) with ${totalViolations} previous violation(s)`,
 				);
 			}
 
@@ -272,7 +283,7 @@ export async function executeRun(
 					effectiveBaseBranch,
 				);
 				if (resolved.warning) {
-					log(chalk.yellow(`Warning: ${resolved.warning}`));
+					log.warn(`Warning: ${resolved.warning}`);
 				}
 				if (resolved.fixBase) {
 					changeOptions = { fixBase: resolved.fixBase };
@@ -299,14 +310,17 @@ export async function executeRun(
 		const expander = new EntryPointExpander();
 		const jobGen = new JobGenerator(config);
 
-		log(chalk.dim("Detecting changes..."));
+		log.debug("Detecting changes...");
 		const changes = await changeDetector.getChangedFiles();
 
 		if (changes.length === 0) {
-			log(chalk.green("No changes detected."));
+			log.info("No changes detected.");
 			// Do not write execution state - no gates ran
 			await releaseLock(config.project.log_dir);
 			consoleLogHandle?.restore();
+			if (loggerInitializedHere) {
+				await resetLogger();
+			}
 			return {
 				status: "no_changes",
 				message: getStatusMessage("no_changes"),
@@ -314,7 +328,7 @@ export async function executeRun(
 			};
 		}
 
-		log(chalk.dim(`Found ${changes.length} changed files.`));
+		log.debug(`Found ${changes.length} changed files.`);
 
 		const entryPoints = await expander.expand(
 			config.project.entry_points,
@@ -327,10 +341,13 @@ export async function executeRun(
 		}
 
 		if (jobs.length === 0) {
-			log(chalk.yellow("No applicable gates for these changes."));
+			log.warn("No applicable gates for these changes.");
 			// Do not write execution state - no gates ran
 			await releaseLock(config.project.log_dir);
 			consoleLogHandle?.restore();
+			if (loggerInitializedHere) {
+				await resetLogger();
+			}
 			return {
 				status: "no_applicable_gates",
 				message: getStatusMessage("no_applicable_gates"),
@@ -338,7 +355,7 @@ export async function executeRun(
 			};
 		}
 
-		log(chalk.dim(`Running ${jobs.length} gates...`));
+		log.debug(`Running ${jobs.length} gates...`);
 
 		// Compute diff stats and log run start
 		const runMode = isRerun ? "verification" : "full";
@@ -400,6 +417,11 @@ export async function executeRun(
 		await releaseLock(config.project.log_dir);
 		consoleLogHandle?.restore();
 
+		// Clean up logger if we initialized it
+		if (loggerInitializedHere) {
+			await resetLogger();
+		}
+
 		return {
 			status,
 			message: getStatusMessage(status),
@@ -414,6 +436,12 @@ export async function executeRun(
 			await releaseLock(config.project.log_dir);
 		}
 		consoleLogHandle?.restore();
+
+		// Clean up logger if we initialized it
+		if (loggerInitializedHere) {
+			await resetLogger();
+		}
+
 		const err = error as { message?: string };
 		const errorMessage = err.message || "unknown error";
 		return {

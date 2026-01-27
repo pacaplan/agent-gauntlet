@@ -4,19 +4,19 @@ import type { Job } from "../../src/core/job";
 import type { GateResult } from "../../src/gates/result";
 
 describe("ConsoleReporter", () => {
-	let originalConsoleLog: typeof console.log;
+	let originalConsoleError: typeof console.error;
 	let logOutput: string[];
 
 	beforeEach(() => {
-		originalConsoleLog = console.log;
+		originalConsoleError = console.error;
 		logOutput = [];
-		console.log = (...args: unknown[]) => {
+		console.error = (...args: unknown[]) => {
 			logOutput.push(args.map(String).join(" "));
 		};
 	});
 
 	afterEach(() => {
-		console.log = originalConsoleLog;
+		console.error = originalConsoleError;
 	});
 
 	describe("onJobStart", () => {

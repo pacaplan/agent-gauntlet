@@ -13,12 +13,15 @@ import type {
 import { CheckGateExecutor } from "../gates/check.js";
 import type { GateResult } from "../gates/result.js";
 import { ReviewGateExecutor } from "../gates/review.js";
+import { getCategoryLogger } from "../output/app-logger.js";
 import type { ConsoleReporter } from "../output/console.js";
 import type { Logger } from "../output/logger.js";
 import type { DebugLogger } from "../utils/debug-log.js";
 import type { PreviousViolation } from "../utils/log-parser.js";
 import { sanitizeJobId } from "../utils/sanitizer.js";
 import type { Job } from "./job.js";
+
+const log = getCategoryLogger("runner");
 
 const execAsync = promisify(exec);
 
@@ -366,8 +369,8 @@ export class Runner {
 			checkUsageLimit: this.config.project.cli.check_usage_limit,
 		});
 		if (health.status !== "healthy") {
-			console.log(
-				`[DEBUG] Adapter ${name} check failed: ${health.status} - ${health.message}`,
+			log.debug(
+				`Adapter ${name} check failed: ${health.status} - ${health.message}`,
 			);
 		}
 		return health.status === "healthy";

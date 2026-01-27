@@ -1,10 +1,13 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import type { ReviewFullJsonOutput } from "../gates/result.js";
+import { getCategoryLogger } from "../output/app-logger.js";
 
 export type { PreviousViolation } from "../gates/result.js";
 
 import type { PreviousViolation } from "../gates/result.js";
+
+const log = getCategoryLogger("log-parser");
 
 export interface AdapterFailure {
 	adapterName: string; // e.g., 'claude', 'gemini'
@@ -110,7 +113,7 @@ export async function parseJsonReviewFile(
 			logPath: jsonPath.replace(/\.json$/, ".log"),
 		};
 	} catch (error) {
-		console.warn("Warning: Failed to parse JSON review file:", jsonPath, error);
+		log.warn(`Failed to parse JSON review file: ${jsonPath} - ${error}`);
 		return null;
 	}
 }
@@ -596,8 +599,8 @@ export async function findPreviousFailures(
 							status !== "fixed" &&
 							status !== "skipped"
 						) {
-							console.warn(
-								`Warning: Unexpected status "${status}" for violation in ${jobId}. Treating as "new".`,
+							log.warn(
+								`Unexpected status "${status}" for violation in ${jobId}. Treating as "new".`,
 							);
 							v.status = "new";
 						}
@@ -655,8 +658,8 @@ export async function findPreviousFailures(
 							status !== "fixed" &&
 							status !== "skipped"
 						) {
-							console.warn(
-								`Warning: Unexpected status "${status}" for violation in ${failure.jobId}. Treating as "new".`,
+							log.warn(
+								`Unexpected status "${status}" for violation in ${failure.jobId}. Treating as "new".`,
 							);
 							v.status = "new";
 						}

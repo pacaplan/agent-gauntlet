@@ -2,48 +2,29 @@ import { describe, expect, it } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
-describe("run-executor log() helper", () => {
-	describe("stderr usage for log output", () => {
-		it("log() helper uses console.error, not console.log", () => {
-			// Read the source file and verify log() uses console.error
+describe("run-executor logging", () => {
+	describe("LogTape integration", () => {
+		it("uses getCategoryLogger for logging", () => {
+			// Read the source file and verify it uses the app logger
 			const sourceFile = readFileSync(
 				join(process.cwd(), "src/core/run-executor.ts"),
 				"utf-8",
 			);
 
-			// Find the log() function definition
-			const logFunctionMatch = sourceFile.match(
-				/function log\([^)]*\):\s*void\s*\{([^}]+)\}/,
-			);
-			expect(logFunctionMatch).not.toBeNull();
-
-			if (logFunctionMatch) {
-				const logFunctionBody = logFunctionMatch[1];
-				// Should use console.error, not console.log
-				expect(logFunctionBody).toContain("console.error");
-				expect(logFunctionBody).not.toContain("console.log");
-			}
+			// Should import getCategoryLogger from app-logger
+			expect(sourceFile).toContain("getCategoryLogger");
+			expect(sourceFile).toContain("app-logger");
 		});
 
-		it("log() helper has a comment explaining stderr usage", () => {
+		it("initializes logger in interactive mode when not already configured", () => {
 			const sourceFile = readFileSync(
 				join(process.cwd(), "src/core/run-executor.ts"),
 				"utf-8",
 			);
 
-			// Find the JSDoc comment for log()
-			const logCommentMatch = sourceFile.match(
-				/\/\*\*[^*]*\*[^/]*\*\/\s*function log/,
-			);
-			expect(logCommentMatch).not.toBeNull();
-
-			if (logCommentMatch) {
-				const comment = logCommentMatch[0];
-				// Comment should mention stderr or stdout
-				expect(
-					comment.includes("stderr") || comment.includes("stdout"),
-				).toBe(true);
-			}
+			// Should check if logger is configured and initialize if not
+			expect(sourceFile).toContain("isLoggerConfigured");
+			expect(sourceFile).toContain('mode: "interactive"');
 		});
 	});
 });
