@@ -121,6 +121,7 @@ export class ReviewGateExecutor {
 		},
 		checkUsageLimit: boolean = false,
 		rerunThreshold: "critical" | "high" | "medium" | "low" = "high",
+		passedSlots?: Map<number, { adapter: string; passIteration: number }>,
 	): Promise<GateResult> {
 		const startTime = Date.now();
 		const logBuffer: string[] = [];
@@ -166,6 +167,9 @@ export class ReviewGateExecutor {
 		};
 
 		try {
+			console.log(
+				`[ReviewGate] Starting review: ${config.name} | entry=${entryPointPath}`,
+			);
 			await mainLogger(`Starting review: ${config.name}\n`);
 			await mainLogger(`Entry point: ${entryPointPath}\n`);
 			await mainLogger(`Base branch: ${baseBranch}\n`);
@@ -175,7 +179,11 @@ export class ReviewGateExecutor {
 				baseBranch,
 				changeOptions,
 			);
+			console.log(
+				`[ReviewGate] getDiff returned ${diff.length} chars, ${diff.split("\n").length} lines`,
+			);
 			if (!diff.trim()) {
+				console.log(`[ReviewGate] Empty diff after trim, returning pass`);
 				await mainLogger("No changes found in entry point, skipping review.\n");
 				await mainLogger("Result: pass - No changes to review\n");
 				return {
@@ -204,6 +212,9 @@ export class ReviewGateExecutor {
 
 			const preferences = config.cli_preference || [];
 			const parallel = config.parallel ?? false;
+			console.log(
+				`[ReviewGate] Checking adapters: ${preferences.join(", ") || "(none configured)"}`,
+			);
 
 			// Determine healthy adapters
 			const healthyAdapters: string[] = [];
@@ -217,10 +228,14 @@ export class ReviewGateExecutor {
 				} else {
 					const adapter = getAdapter(toolName);
 					if (!adapter) {
+						console.log(`[ReviewGate] Adapter ${toolName}: not found`);
 						isHealthy = false;
 					} else {
 						const health = await adapter.checkHealth({ checkUsageLimit });
 						isHealthy = health.status === "healthy";
+						console.log(
+							`[ReviewGate] Adapter ${toolName}: ${health.status}${health.message ? ` - ${health.message}` : ""}`,
+						);
 						if (!isHealthy) {
 							await mainLogger(
 								`Skipping ${toolName}: ${health.message || "Unhealthy"}\n`,
@@ -236,6 +251,7 @@ export class ReviewGateExecutor {
 
 			if (healthyAdapters.length === 0) {
 				const msg = "Review dispatch failed: no healthy adapters available";
+				console.log(`[ReviewGate] ERROR: ${msg}`);
 				await mainLogger(`Result: error - ${msg}\n`);
 				return {
 					jobId,
@@ -245,24 +261,141 @@ export class ReviewGateExecutor {
 					logPaths,
 				};
 			}
+			console.log(
+				`[ReviewGate] Healthy adapters: ${healthyAdapters.join(", ")}`,
+			);
 
 			// Round-robin assignment over healthy adapters
-			const assignments: Array<{ adapter: string; reviewIndex: number }> = [];
+			const assignments: Array<{
+				adapter: string;
+				reviewIndex: number;
+				skip?: boolean;
+				skipReason?: string;
+				passIteration?: number;
+			}> = [];
 			for (let i = 0; i < required; i++) {
+				const adapter = healthyAdapters[i % healthyAdapters.length];
+				if (!adapter) continue;
 				assignments.push({
-					adapter: healthyAdapters[i % healthyAdapters.length]!,
+					adapter,
 					reviewIndex: i + 1,
 				});
 			}
 
-			await mainLogger(
-				`Dispatching ${required} review(s) via round-robin: ${assignments.map((a) => `${a.adapter}@${a.reviewIndex}`).join(", ")}\n`,
+			// Skip logic for passed slots (only when num_reviews > 1 and in rerun mode)
+			if (required > 1 && passedSlots && passedSlots.size > 0) {
+				// Identify which slots passed (with same adapter) and which failed
+				const passedIndexes: number[] = [];
+				const failedIndexes: number[] = [];
+
+				for (const assignment of assignments) {
+					const passed = passedSlots.get(assignment.reviewIndex);
+					// Only consider as passed if same adapter is assigned
+					if (passed && passed.adapter === assignment.adapter) {
+						passedIndexes.push(assignment.reviewIndex);
+						assignment.passIteration = passed.passIteration;
+					} else {
+						failedIndexes.push(assignment.reviewIndex);
+					}
+				}
+
+				if (failedIndexes.length > 0) {
+					// Some slots failed: run failed slots, skip passed slots
+					for (const assignment of assignments) {
+						if (assignment.passIteration !== undefined) {
+							assignment.skip = true;
+							assignment.skipReason = `previously passed in iteration ${assignment.passIteration} (num_reviews > 1)`;
+						}
+					}
+				} else if (passedIndexes.length === assignments.length) {
+					// All slots passed: safety latch - run slot 1, skip rest
+					for (const assignment of assignments) {
+						if (assignment.reviewIndex === 1) {
+							assignment.skip = false;
+							// Log safety latch message
+							await mainLogger(
+								`Running @1: safety latch (all slots previously passed)\n`,
+							);
+						} else {
+							assignment.skip = true;
+							assignment.skipReason = `previously passed in iteration ${assignment.passIteration} (num_reviews > 1)`;
+						}
+					}
+				}
+			}
+
+			// Log skip messages
+			for (const assignment of assignments) {
+				if (assignment.skip && assignment.skipReason) {
+					await mainLogger(
+						`Skipping @${assignment.reviewIndex}: ${assignment.skipReason}\n`,
+					);
+				}
+			}
+
+			const dispatchMsg = `Dispatching ${required} review(s) via round-robin: ${assignments.map((a) => `${a.adapter}@${a.reviewIndex}`).join(", ")}`;
+			console.log(`[ReviewGate] ${dispatchMsg}`);
+			await mainLogger(`${dispatchMsg}\n`);
+
+			// Separate assignments into running and skipped
+			const runningAssignments = assignments.filter((a) => !a.skip);
+			const skippedAssignments = assignments.filter((a) => a.skip);
+			console.log(
+				`[ReviewGate] Running: ${runningAssignments.length}, Skipped: ${skippedAssignments.length}`,
 			);
 
-			if (parallel && required > 1) {
+			// Track skipped slots for output
+			const skippedSlotOutputs: Array<{
+				adapter: string;
+				reviewIndex: number;
+				status: "skipped_prior_pass";
+				message: string;
+				passIteration: number;
+			}> = [];
+
+			// Handle skipped slots: write JSON log with status "skipped_prior_pass"
+			for (const assignment of skippedAssignments) {
+				const { logger, logPath } = await loggerFactory(
+					assignment.adapter,
+					assignment.reviewIndex,
+				);
+
+				// Write to log file explaining the skip
+				const skipMessage = `[${new Date().toISOString()}] Review skipped: previously passed in iteration ${assignment.passIteration}\n`;
+				await logger(skipMessage);
+				await logger(`Adapter: ${assignment.adapter}\n`);
+				await logger(`Review index: @${assignment.reviewIndex}\n`);
+				await logger(`Status: skipped_prior_pass\n`);
+
+				const jsonPath = logPath.replace(/\.log$/, ".json");
+				const skippedOutput: ReviewFullJsonOutput = {
+					adapter: assignment.adapter,
+					timestamp: new Date().toISOString(),
+					status: "skipped_prior_pass",
+					rawOutput: "",
+					violations: [],
+					passIteration: assignment.passIteration,
+				};
+				await fs.writeFile(jsonPath, JSON.stringify(skippedOutput, null, 2));
+
+				if (!logPathsSet.has(logPath)) {
+					logPathsSet.add(logPath);
+					logPaths.push(logPath);
+				}
+
+				skippedSlotOutputs.push({
+					adapter: assignment.adapter,
+					reviewIndex: assignment.reviewIndex,
+					status: "skipped_prior_pass",
+					message: `Skipped: previously passed in iteration ${assignment.passIteration}`,
+					passIteration: assignment.passIteration ?? 0,
+				});
+			}
+
+			if (parallel && runningAssignments.length > 1) {
 				// Parallel execution
 				const results = await Promise.all(
-					assignments.map((assignment) =>
+					runningAssignments.map((assignment) =>
 						this.runSingleReview(
 							assignment.adapter,
 							assignment.reviewIndex,
@@ -290,7 +423,7 @@ export class ReviewGateExecutor {
 				}
 			} else {
 				// Sequential execution
-				for (const assignment of assignments) {
+				for (const assignment of runningAssignments) {
 					const res = await this.runSingleReview(
 						assignment.adapter,
 						assignment.reviewIndex,
@@ -314,8 +447,9 @@ export class ReviewGateExecutor {
 				}
 			}
 
-			if (outputs.length < required) {
-				const msg = `Failed to complete ${required} reviews. Completed: ${outputs.length}. See logs for details.`;
+			// Check if all running reviews completed (skipped ones don't count)
+			if (outputs.length < runningAssignments.length) {
+				const msg = `Failed to complete reviews. Expected: ${runningAssignments.length}, Completed: ${outputs.length}. See logs for details.`;
 				await mainLogger(`Result: error - ${msg}\n`);
 				return {
 					jobId,
@@ -341,6 +475,11 @@ export class ReviewGateExecutor {
 				message = `Failed by ${failed.length} adapter(s)`;
 			}
 
+			// Add skipped slot count to message if any
+			if (skippedSlotOutputs.length > 0) {
+				message += ` (${skippedSlotOutputs.length} skipped due to prior pass)`;
+			}
+
 			const subResults = outputs.map((out) => {
 				const specificLog = logPaths.find((p) => {
 					const filename = path.basename(p);
@@ -363,16 +502,50 @@ export class ReviewGateExecutor {
 							? 1
 							: 0;
 
+				const fixedCount =
+					out.json && Array.isArray(out.json.violations)
+						? out.json.violations.filter((v) => v.status === "fixed").length
+						: 0;
+
 				return {
 					nameSuffix: `(${out.adapter}@${out.reviewIndex})`,
 					status: out.status,
 					message: out.message,
 					logPath,
 					errorCount,
+					fixedCount,
 					skipped: out.skipped,
 				};
 			});
 
+			// Add skipped slot subResults (they don't affect gate status)
+			for (const skipped of skippedSlotOutputs) {
+				const specificLog = logPaths.find((p) => {
+					const filename = path.basename(p);
+					return (
+						filename.includes(`_${skipped.adapter}@${skipped.reviewIndex}.`) &&
+						filename.endsWith(".log")
+					);
+				});
+
+				subResults.push({
+					nameSuffix: `(${skipped.adapter}@${skipped.reviewIndex})`,
+					status: "pass" as const, // Show as pass since it previously passed
+					message: skipped.message,
+					logPath: specificLog?.replace(/\.log$/, ".json"),
+					errorCount: 0,
+					skipped: undefined,
+				});
+			}
+
+			// Sort subResults by review index for consistent ordering
+			subResults.sort((a, b) => {
+				const aIndex = parseInt(a.nameSuffix.match(/@(\d+)/)?.[1] || "0", 10);
+				const bIndex = parseInt(b.nameSuffix.match(/@(\d+)/)?.[1] || "0", 10);
+				return aIndex - bIndex;
+			});
+
+			console.log(`[ReviewGate] Complete: ${status} - ${message}`);
 			await mainLogger(`Result: ${status} - ${message}\n`);
 
 			return {
@@ -385,14 +558,18 @@ export class ReviewGateExecutor {
 				skipped: allSkipped,
 			};
 		} catch (error: unknown) {
-			const err = error as { message?: string };
-			await mainLogger(`Critical Error: ${err.message}\n`);
+			const err = error as { message?: string; stack?: string };
+			const errMsg = err.message || "Unknown error";
+			const errStack = err.stack || "";
+			// nosemgrep: javascript.lang.security.audit.unsafe-formatstring.unsafe-formatstring
+			console.error("[ReviewGate] CRITICAL ERROR:", errMsg, errStack);
+			await mainLogger(`Critical Error: ${errMsg}\n`);
 			await mainLogger("Result: error\n");
 			return {
 				jobId,
 				status: "error",
 				duration: Date.now() - startTime,
-				message: err.message,
+				message: errMsg,
 				logPaths,
 			};
 		}
@@ -477,6 +654,10 @@ export class ReviewGateExecutor {
 				diff,
 				model: config.model,
 				timeoutMs: config.timeout ? config.timeout * 1000 : undefined,
+				onOutput: (chunk: string) => {
+					// Stream output to log file in real-time
+					adapterLogger(chunk);
+				},
 			});
 
 			await adapterLogger(
@@ -627,6 +808,7 @@ export class ReviewGateExecutor {
 		} catch (error: unknown) {
 			const err = error as { message?: string };
 			const errorMsg = `Error running ${adapter.name}@${reviewIndex}: ${err.message}`;
+			console.error(`[ReviewGate] ${errorMsg}`);
 			await adapterLogger(`${errorMsg}\n`);
 			await mainLogger(`${errorMsg}\n`);
 			return null;
@@ -904,9 +1086,9 @@ The following violations were NOT marked as fixed or skipped and are still activ
 
 		try {
 			const jsonBlockMatch = output.match(/```json\s*([\s\S]*?)\s*```/);
-			if (jsonBlockMatch) {
+			if (jsonBlockMatch?.[1]) {
 				try {
-					const json = JSON.parse(jsonBlockMatch[1]!);
+					const json = JSON.parse(jsonBlockMatch[1]);
 					return this.validateAndReturn(json, diffRanges);
 				} catch {
 					// Fall through

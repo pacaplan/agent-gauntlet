@@ -1,6 +1,12 @@
 import chalk from "chalk";
 import type { Command } from "commander";
+import { loadGlobalConfig } from "../config/global.js";
 import { loadConfig } from "../config/loader.js";
+import {
+	getDebugLogger,
+	initDebugLogger,
+	mergeDebugLogConfig,
+} from "../utils/debug-log.js";
 import { acquireLock, cleanLogs, releaseLock } from "./shared.js";
 
 export function registerCleanCommand(program: Command): void {
@@ -12,6 +18,20 @@ export function registerCleanCommand(program: Command): void {
 			let lockAcquired = false;
 			try {
 				config = await loadConfig();
+
+				// Initialize debug logger
+				const globalConfig = await loadGlobalConfig();
+				const debugLogConfig = mergeDebugLogConfig(
+					config.project.debug_log,
+					globalConfig.debug_log,
+				);
+				initDebugLogger(config.project.log_dir, debugLogConfig);
+
+				// Log the command invocation
+				const debugLogger = getDebugLogger();
+				await debugLogger?.logCommand("clean", []);
+				await debugLogger?.logClean("manual", "user_request");
+
 				await acquireLock(config.project.log_dir);
 				lockAcquired = true;
 				await cleanLogs(config.project.log_dir);

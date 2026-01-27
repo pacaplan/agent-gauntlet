@@ -15,11 +15,81 @@ import type { GateResult } from "../gates/result.js";
 import { ReviewGateExecutor } from "../gates/review.js";
 import type { ConsoleReporter } from "../output/console.js";
 import type { Logger } from "../output/logger.js";
+import type { DebugLogger } from "../utils/debug-log.js";
 import type { PreviousViolation } from "../utils/log-parser.js";
 import { sanitizeJobId } from "../utils/sanitizer.js";
 import type { Job } from "./job.js";
 
 const execAsync = promisify(exec);
+
+/**
+ * Iteration statistics for RUN_END logging.
+ */
+export interface IterationStats {
+	/** Number of violations marked as fixed */
+	fixed: number;
+	/** Number of violations marked as skipped */
+	skipped: number;
+	/** Number of remaining active violations (failures) */
+	failed: number;
+}
+
+/**
+ * Structured result from Runner.run() for proper status mapping.
+ */
+export interface RunnerOutcome {
+	/** Whether all gates passed */
+	allPassed: boolean;
+	/** Whether any violations were skipped (for passed_with_warnings) */
+	anySkipped: boolean;
+	/** Whether retry limit was exceeded */
+	retryLimitExceeded: boolean;
+	/** Whether any gates had errors */
+	anyErrors: boolean;
+	/** Iteration statistics for debug logging */
+	stats: IterationStats;
+}
+
+/**
+ * Calculate iteration statistics from gate results.
+ * Aggregates fixed, skipped, and failed counts from all results and subResults.
+ * For CHECK gates that don't set errorCount, count failed/error status as 1 failure.
+ */
+function calculateStats(results: GateResult[]): IterationStats {
+	let fixed = 0;
+	let skipped = 0;
+	let failed = 0;
+
+	for (const result of results) {
+		// Count from top-level result
+		if (result.fixedCount) fixed += result.fixedCount;
+		if (result.skipped) skipped += result.skipped.length;
+
+		// For failed gates, use errorCount if set, otherwise count as 1 failure
+		// This handles CHECK gates which only set status but not errorCount
+		if (result.errorCount) {
+			failed += result.errorCount;
+		} else if (result.status === "fail" || result.status === "error") {
+			failed += 1;
+		}
+
+		// Count from subResults (review gates)
+		if (result.subResults) {
+			for (const sub of result.subResults) {
+				if (sub.fixedCount) fixed += sub.fixedCount;
+				if (sub.skipped) skipped += sub.skipped.length;
+
+				if (sub.errorCount) {
+					failed += sub.errorCount;
+				} else if (sub.status === "fail" || sub.status === "error") {
+					failed += 1;
+				}
+			}
+		}
+	}
+
+	return { fixed, skipped, failed };
+}
 
 export class Runner {
 	private checkExecutor = new CheckGateExecutor();
@@ -34,10 +104,16 @@ export class Runner {
 		private previousFailuresMap?: Map<string, Map<string, PreviousViolation[]>>,
 		private changeOptions?: { commit?: string; uncommitted?: boolean },
 		private baseBranchOverride?: string,
+		private passedSlotsMap?: Map<
+			string,
+			Map<number, { adapter: string; passIteration: number }>
+		>,
+		private debugLogger?: DebugLogger,
 	) {}
 
-	async run(jobs: Job[]): Promise<boolean> {
-		await this.logger.init();
+	async run(jobs: Job[]): Promise<RunnerOutcome> {
+		// Note: logger.init() is called by the caller (run-executor, check, review)
+		// before startConsoleLog to ensure unified numbering
 
 		// Enforce retry limit before executing gates
 		const maxRetries = this.config.project.max_retries ?? 3;
@@ -46,10 +122,16 @@ export class Runner {
 
 		if (currentRunNumber > maxAllowedRuns) {
 			console.error(
-				`Retry limit exceeded: run ${currentRunNumber} exceeds max allowed ${maxAllowedRuns} (max_retries: ${maxRetries}). Run \`agent-gauntlet clean\` to reset.`,
+				`Retry limit exceeded: run ${currentRunNumber} exceeds max allowed ${maxAllowedRuns} (max_retries: ${maxRetries}). Human input required on what to do next.`,
 			);
 			process.exitCode = 1;
-			return false;
+			return {
+				allPassed: false,
+				anySkipped: false,
+				retryLimitExceeded: true,
+				anyErrors: false,
+				stats: { fixed: 0, skipped: 0, failed: 0 },
+			};
 		}
 
 		const { runnableJobs, preflightResults } = await this.preflight(jobs);
@@ -77,20 +159,41 @@ export class Runner {
 		await Promise.all([...parallelPromises, sequentialPromise]);
 
 		const allPassed = this.results.every((r) => r.status === "pass");
+		const anySkipped = this.results.some(
+			(r) => r.skipped && r.skipped.length > 0,
+		);
+		const anyErrors = this.results.some((r) => r.status === "error");
+		const retryLimitExceeded =
+			!allPassed && currentRunNumber === maxAllowedRuns;
+
+		// Calculate statistics from results
+		const stats = calculateStats(this.results);
 
 		// If on the final allowed run and gates failed, report "Retry limit exceeded"
-		if (!allPassed && currentRunNumber === maxAllowedRuns) {
+		if (retryLimitExceeded) {
 			await this.reporter.printSummary(
 				this.results,
 				this.config.project.log_dir,
 				"Retry limit exceeded",
 			);
-			return false;
+			return {
+				allPassed: false,
+				anySkipped,
+				retryLimitExceeded: true,
+				anyErrors,
+				stats,
+			};
 		}
 
 		await this.reporter.printSummary(this.results, this.config.project.log_dir);
 
-		return allPassed;
+		return {
+			allPassed,
+			anySkipped,
+			retryLimitExceeded: false,
+			anyErrors,
+			stats,
+		};
 	}
 
 	private async executeJob(job: Job): Promise<void> {
@@ -118,6 +221,7 @@ export class Runner {
 				// Use sanitized Job ID for lookup because that's what log-parser uses (based on filenames)
 				const safeJobId = sanitizeJobId(job.id);
 				const previousFailures = this.previousFailuresMap?.get(safeJobId);
+				const passedSlots = this.passedSlotsMap?.get(safeJobId);
 				const loggerFactory = this.logger.createLoggerFactory(job.id);
 				const effectiveBaseBranch =
 					this.baseBranchOverride || this.config.project.base_branch;
@@ -131,6 +235,7 @@ export class Runner {
 					this.changeOptions,
 					this.config.project.cli.check_usage_limit,
 					this.config.project.rerun_new_issue_threshold,
+					passedSlots,
 				);
 			}
 		} catch (err) {
@@ -145,6 +250,14 @@ export class Runner {
 
 		this.results.push(result);
 		this.reporter.onJobComplete(job, result);
+
+		// Log gate result
+		await this.debugLogger?.logGateResult(
+			job.id,
+			result.status,
+			result.duration,
+			result.errorCount,
+		);
 
 		// Handle Fail Fast (only for checks, and only when parallel is false)
 		if (

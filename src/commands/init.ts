@@ -200,6 +200,11 @@ For each issue: cite file:line, explain the problem, suggest a fix.
 					availableAdapters,
 				);
 			}
+
+			// Handle stop hook installation (only in interactive mode)
+			if (!options.yes) {
+				await promptAndInstallStopHook(projectRoot);
+			}
 		});
 }
 
@@ -619,4 +624,137 @@ async function installCommands(
 			);
 		}
 	}
+}
+
+/**
+ * The stop hook configuration for Claude Code.
+ */
+const STOP_HOOK_CONFIG = {
+	hooks: {
+		Stop: [
+			{
+				hooks: [
+					{
+						type: "command",
+						command: "agent-gauntlet stop-hook",
+						timeout: 300,
+					},
+				],
+			},
+		],
+	},
+};
+
+/**
+ * Check if running in an interactive TTY environment.
+ */
+function isInteractive(): boolean {
+	return Boolean(process.stdin.isTTY);
+}
+
+/**
+ * Prompt user to install the Claude Code stop hook.
+ */
+async function promptAndInstallStopHook(projectRoot: string): Promise<void> {
+	// Skip in non-interactive mode
+	if (!isInteractive()) {
+		return;
+	}
+
+	const rl = readline.createInterface({
+		input: process.stdin,
+		output: process.stdout,
+	});
+
+	const question = (prompt: string): Promise<string> => {
+		return new Promise((resolve) => {
+			rl.question(prompt, (answer) => {
+				resolve(answer?.trim() ?? "");
+			});
+		});
+	};
+
+	try {
+		console.log();
+		const answer = await question("Install Claude Code stop hook? (y/n): ");
+
+		const shouldInstall =
+			answer.toLowerCase() === "y" || answer.toLowerCase() === "yes";
+
+		if (!shouldInstall) {
+			rl.close();
+			return;
+		}
+
+		rl.close();
+		await installStopHook(projectRoot);
+	} catch (error: unknown) {
+		rl.close();
+		throw error;
+	}
+}
+
+/**
+ * Install the stop hook configuration to .claude/settings.local.json.
+ */
+export async function installStopHook(projectRoot: string): Promise<void> {
+	const claudeDir = path.join(projectRoot, ".claude");
+	const settingsPath = path.join(claudeDir, "settings.local.json");
+
+	// Ensure .claude directory exists
+	await fs.mkdir(claudeDir, { recursive: true });
+
+	let existingSettings: Record<string, unknown> = {};
+
+	// Check if settings.local.json already exists
+	if (await exists(settingsPath)) {
+		try {
+			const content = await fs.readFile(settingsPath, "utf-8");
+			existingSettings = JSON.parse(content);
+		} catch {
+			// If parsing fails, start fresh
+			existingSettings = {};
+		}
+	}
+
+	// Merge hooks configuration
+	const existingHooks =
+		(existingSettings.hooks as Record<string, unknown>) || {};
+	const existingStopHooks = Array.isArray(existingHooks.Stop)
+		? existingHooks.Stop
+		: [];
+
+	// Check if stop hook already exists to avoid duplicates
+	const hookExists = existingStopHooks.some((hook: unknown) =>
+		(hook as { hooks?: { command?: string }[] })?.hooks?.some?.(
+			(h) => h?.command === "agent-gauntlet stop-hook",
+		),
+	);
+	if (hookExists) {
+		console.log(chalk.dim("Stop hook already installed"));
+		return;
+	}
+
+	// Add our stop hook to the existing Stop hooks
+	const newStopHooks = [...existingStopHooks, ...STOP_HOOK_CONFIG.hooks.Stop];
+
+	const mergedSettings = {
+		...existingSettings,
+		hooks: {
+			...existingHooks,
+			Stop: newStopHooks,
+		},
+	};
+
+	// Write with pretty formatting
+	await fs.writeFile(
+		settingsPath,
+		`${JSON.stringify(mergedSettings, null, 2)}\n`,
+	);
+
+	console.log(
+		chalk.green(
+			"Stop hook installed - gauntlet will run automatically when agent stops",
+		),
+	);
 }

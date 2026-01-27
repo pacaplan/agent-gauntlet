@@ -189,7 +189,33 @@ This creates:
 
 Your local check definitions (`.gauntlet/checks/*.yml`) are automatically used in CI. The `ci.yml` file lets you configure additional CI-specific settings like database services or runtime versions.
 
+## Stop Hook (Claude Code Integration)
+
+The stop hook automatically runs the gauntlet when an AI agent tries to stop working, ensuring all gates pass before completion.
+
+**Quick setup for Claude Code:**
+
+Add this to your Claude Code settings (`.claude/settings.json` or via `claude settings`):
+
+```json
+{
+  "hooks": {
+    "Stop": [
+      {
+        "matcher": "",
+        "hooks": ["agent-gauntlet stop-hook"]
+      }
+    ]
+  }
+}
+```
+
+When the agent tries to stop, the hook runs the gauntlet. If gates fail, the agent is directed to fix issues before stopping.
+
+For detailed configuration options, troubleshooting, and advanced usage, see the [Stop Hook Guide](stop-hook-guide.md).
+
 ## Further Reading
 - [User Guide](user-guide.md) — full usage details
 - [Configuration Reference](config-reference.md) — all configuration fields + defaults
 - [CLI Invocation Details](cli-invocation-details.md) — how we securely invoke AI CLIs
+- [Stop Hook Guide](stop-hook-guide.md) — stop hook configuration and troubleshooting

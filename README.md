@@ -86,5 +86,6 @@ For basic usage and configuration guide, see the [Quick Start Guide](docs/quick-
 - [Quick Start Guide](docs/quick-start.md) — installation, basic usage, and config layout
 - [User Guide](docs/user-guide.md) — full usage details
 - [Configuration Reference](docs/config-reference.md) — all configuration fields + defaults
+- [Stop Hook Guide](docs/stop-hook-guide.md) — integrate with Claude Code's stop hook
 - [CLI Invocation Details](docs/cli-invocation-details.md) — how we securely invoke AI CLIs
 - [Development Guide](docs/development.md) — how to build and develop this project

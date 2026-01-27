@@ -45,7 +45,9 @@ mock.module("../../src/cli-adapters/index.js", () => ({
 }));
 
 // Import after mocking
-const { registerInitCommand } = await import("../../src/commands/init.js");
+const { registerInitCommand, installStopHook } = await import(
+	"../../src/commands/init.js"
+);
 
 describe("Init Command", () => {
 	let program: Command;
@@ -126,5 +128,187 @@ describe("Init Command", () => {
 
 		const output = logs.join("\n");
 		expect(output).toContain(".gauntlet directory already exists");
+	});
+});
+
+describe("Stop Hook Installation", () => {
+	const originalConsoleLog = console.log;
+	const originalCwd = process.cwd();
+	let logs: string[];
+
+	beforeAll(async () => {
+		await fs.mkdir(TEST_DIR, { recursive: true });
+	});
+
+	afterAll(async () => {
+		await fs.rm(TEST_DIR, { recursive: true, force: true });
+	});
+
+	beforeEach(() => {
+		logs = [];
+		console.log = (...args: unknown[]) => {
+			logs.push(args.join(" "));
+		};
+		process.chdir(TEST_DIR);
+	});
+
+	afterEach(async () => {
+		console.log = originalConsoleLog;
+		process.chdir(originalCwd);
+		// Cleanup
+		await fs
+			.rm(path.join(TEST_DIR, ".claude"), { recursive: true, force: true })
+			.catch(() => {});
+	});
+
+	describe("Settings File Creation", () => {
+		it("should create .claude/ directory if it doesn't exist", async () => {
+			await installStopHook(TEST_DIR);
+
+			const claudeDir = path.join(TEST_DIR, ".claude");
+			const stat = await fs.stat(claudeDir);
+			expect(stat.isDirectory()).toBe(true);
+		});
+
+		it("should create settings.local.json in existing .claude/ directory", async () => {
+			// Pre-create .claude directory
+			await fs.mkdir(path.join(TEST_DIR, ".claude"), { recursive: true });
+
+			await installStopHook(TEST_DIR);
+
+			const settingsPath = path.join(
+				TEST_DIR,
+				".claude",
+				"settings.local.json",
+			);
+			const stat = await fs.stat(settingsPath);
+			expect(stat.isFile()).toBe(true);
+		});
+
+		it("should merge with existing settings.local.json", async () => {
+			// Pre-create .claude directory with existing settings
+			await fs.mkdir(path.join(TEST_DIR, ".claude"), { recursive: true });
+			await fs.writeFile(
+				path.join(TEST_DIR, ".claude", "settings.local.json"),
+				JSON.stringify({
+					someOtherSetting: "value",
+					hooks: {
+						PreToolUse: [{ type: "command", command: "echo test" }],
+					},
+				}),
+			);
+
+			await installStopHook(TEST_DIR);
+
+			const settingsPath = path.join(
+				TEST_DIR,
+				".claude",
+				"settings.local.json",
+			);
+			const content = await fs.readFile(settingsPath, "utf-8");
+			const settings = JSON.parse(content);
+
+			// Should preserve existing settings
+			expect(settings.someOtherSetting).toBe("value");
+			// Should preserve existing hooks
+			expect(settings.hooks.PreToolUse).toBeDefined();
+			// Should add Stop hooks
+			expect(settings.hooks.Stop).toBeDefined();
+		});
+	});
+
+	describe("Hook Configuration Content", () => {
+		it("should have hooks.Stop array with command hook", async () => {
+			await installStopHook(TEST_DIR);
+
+			const settingsPath = path.join(
+				TEST_DIR,
+				".claude",
+				"settings.local.json",
+			);
+			const content = await fs.readFile(settingsPath, "utf-8");
+			const settings = JSON.parse(content);
+
+			expect(Array.isArray(settings.hooks.Stop)).toBe(true);
+			expect(settings.hooks.Stop.length).toBeGreaterThan(0);
+
+			// Check the structure of the first hook
+			const firstHook = settings.hooks.Stop[0];
+			expect(firstHook.hooks).toBeDefined();
+			expect(Array.isArray(firstHook.hooks)).toBe(true);
+		});
+
+		it("should set command to 'agent-gauntlet stop-hook'", async () => {
+			await installStopHook(TEST_DIR);
+
+			const settingsPath = path.join(
+				TEST_DIR,
+				".claude",
+				"settings.local.json",
+			);
+			const content = await fs.readFile(settingsPath, "utf-8");
+			const settings = JSON.parse(content);
+
+			const innerHook = settings.hooks.Stop[0].hooks[0];
+			expect(innerHook.command).toBe("agent-gauntlet stop-hook");
+		});
+
+		it("should set timeout to 300 seconds", async () => {
+			await installStopHook(TEST_DIR);
+
+			const settingsPath = path.join(
+				TEST_DIR,
+				".claude",
+				"settings.local.json",
+			);
+			const content = await fs.readFile(settingsPath, "utf-8");
+			const settings = JSON.parse(content);
+
+			const innerHook = settings.hooks.Stop[0].hooks[0];
+			expect(innerHook.timeout).toBe(300);
+		});
+
+		it("should set type to 'command'", async () => {
+			await installStopHook(TEST_DIR);
+
+			const settingsPath = path.join(
+				TEST_DIR,
+				".claude",
+				"settings.local.json",
+			);
+			const content = await fs.readFile(settingsPath, "utf-8");
+			const settings = JSON.parse(content);
+
+			const innerHook = settings.hooks.Stop[0].hooks[0];
+			expect(innerHook.type).toBe("command");
+		});
+
+		it("should output properly formatted JSON (indented)", async () => {
+			await installStopHook(TEST_DIR);
+
+			const settingsPath = path.join(
+				TEST_DIR,
+				".claude",
+				"settings.local.json",
+			);
+			const content = await fs.readFile(settingsPath, "utf-8");
+
+			// Should be formatted with indentation (not a single line)
+			expect(content.includes("\n")).toBe(true);
+			// Should have 2-space indentation (default for JSON.stringify(x, null, 2))
+			expect(content.includes('  "hooks"')).toBe(true);
+		});
+	});
+
+	describe("Installation Feedback", () => {
+		it("should show confirmation message on successful installation", async () => {
+			await installStopHook(TEST_DIR);
+
+			const output = logs.join("\n");
+			expect(output).toContain("Stop hook installed");
+			expect(output).toContain(
+				"gauntlet will run automatically when agent stops",
+			);
+		});
 	});
 });

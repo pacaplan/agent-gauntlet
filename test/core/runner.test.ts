@@ -1,9 +1,9 @@
 import { afterEach, describe, expect, it, mock } from "bun:test";
 import type { LoadedConfig } from "../../src/config/types";
+import type { Job } from "../../src/core/job";
+import { Runner, type IterationStats } from "../../src/core/runner";
 import type { ConsoleReporter } from "../../src/output/console";
 import type { Logger } from "../../src/output/logger";
-import type { Job } from "../../src/core/job";
-import { Runner } from "../../src/core/runner";
 
 // Mock dependencies
 const mockLogger = {
@@ -85,9 +85,17 @@ describe("Runner", () => {
 		// biome-ignore lint/suspicious/noExplicitAny: Accessing private method for testing
 		(runner as any).checkAdapter = mock(async () => true);
 
-		const success = await runner.run([job]);
+		// Suppress console.error during this test to prevent bun from misinterpreting
+		// the expected error output as a test failure
+		const originalError = console.error;
+		console.error = () => {};
 
-		expect(success).toBe(false);
+		const outcome = await runner.run([job]);
+
+		console.error = originalError;
+
+		expect(outcome.allPassed).toBe(false);
+		expect(outcome.anyErrors).toBe(true);
 		expect(mockReporter.onJobStart).toHaveBeenCalled();
 		expect(mockReporter.onJobComplete).toHaveBeenCalledWith(
 			job,
@@ -96,5 +104,90 @@ describe("Runner", () => {
 				message: "Crash!",
 			}),
 		);
+	});
+
+	describe("iteration statistics", () => {
+		it("returns stats object with fixed, skipped, and failed counts", async () => {
+			const runner = new Runner(mockConfig, mockLogger, mockReporter);
+
+			// Mock preflight to succeed
+			// biome-ignore lint/suspicious/noExplicitAny: Accessing private method for testing
+			(runner as any).checkAdapter = mock(async () => true);
+
+			const job: Job = {
+				id: "review-job",
+				type: "review",
+				entryPoint: "src",
+				gateConfig: {
+					name: "review",
+					cli_preference: ["mock"],
+					// biome-ignore lint/suspicious/noExplicitAny: Partial mock config for testing
+				} as any,
+				workingDirectory: ".",
+				name: "review",
+			};
+
+			const outcome = await runner.run([job]);
+
+			// Should have stats object with the correct structure
+			expect(outcome.stats).toBeDefined();
+			expect(typeof outcome.stats.fixed).toBe("number");
+			expect(typeof outcome.stats.skipped).toBe("number");
+			expect(typeof outcome.stats.failed).toBe("number");
+		});
+
+		it("returns zero stats when no violations exist", async () => {
+			const runner = new Runner(mockConfig, mockLogger, mockReporter);
+
+			// biome-ignore lint/suspicious/noExplicitAny: Accessing private method for testing
+			(runner as any).checkAdapter = mock(async () => true);
+
+			const job: Job = {
+				id: "review-job",
+				type: "review",
+				entryPoint: "src",
+				gateConfig: {
+					name: "review",
+					cli_preference: ["mock"],
+					// biome-ignore lint/suspicious/noExplicitAny: Partial mock config for testing
+				} as any,
+				workingDirectory: ".",
+				name: "review",
+			};
+
+			const outcome = await runner.run([job]);
+
+			// With mock returning pass status, stats should be zero
+			expect(outcome.stats.fixed).toBe(0);
+			expect(outcome.stats.skipped).toBe(0);
+			expect(outcome.stats.failed).toBe(0);
+		});
+
+		it("returns zero stats on retry limit exceeded early exit", async () => {
+			// Create a logger that returns run number > max allowed
+			const exceedLimitLogger = {
+				...mockLogger,
+				getRunNumber: mock(() => 5), // Exceeds default max_retries + 1 = 4
+			} as unknown as Logger;
+
+			const runner = new Runner(mockConfig, exceedLimitLogger, mockReporter);
+
+			// Suppress console.error and save exitCode during this test to prevent
+			// the expected error handling from affecting the test runner
+			const originalError = console.error;
+			console.error = () => {};
+
+			const outcome = await runner.run([]);
+
+			console.error = originalError;
+			// Reset exitCode to 0 since the runner sets it to 1 on retry limit exceeded
+			process.exitCode = 0;
+
+			expect(outcome.retryLimitExceeded).toBe(true);
+			expect(outcome.stats).toBeDefined();
+			expect(outcome.stats.fixed).toBe(0);
+			expect(outcome.stats.skipped).toBe(0);
+			expect(outcome.stats.failed).toBe(0);
+		});
 	});
 });

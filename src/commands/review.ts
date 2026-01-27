@@ -1,23 +1,39 @@
 import chalk from "chalk";
 import type { Command } from "commander";
+import { loadGlobalConfig } from "../config/global.js";
 import { loadConfig } from "../config/loader.js";
 import { ChangeDetector } from "../core/change-detector.js";
 import { EntryPointExpander } from "../core/entry-point.js";
 import { JobGenerator } from "../core/job.js";
 import { Runner } from "../core/runner.js";
 import { ConsoleReporter } from "../output/console.js";
-import { startConsoleLog } from "../output/console-log.js";
+import {
+	type ConsoleLogHandle,
+	startConsoleLog,
+} from "../output/console-log.js";
 import { Logger } from "../output/logger.js";
 import {
+	getDebugLogger,
+	initDebugLogger,
+	mergeDebugLogConfig,
+} from "../utils/debug-log.js";
+import {
+	readExecutionState,
+	resolveFixBase,
+	writeExecutionState,
+} from "../utils/execution-state.js";
+import {
 	findPreviousFailures,
+	type PassedSlot,
 	type PreviousViolation,
 } from "../utils/log-parser.js";
-import { readSessionRef, writeSessionRef } from "../utils/session-ref.js";
 import {
 	acquireLock,
 	cleanLogs,
 	hasExistingLogs,
+	performAutoClean,
 	releaseLock,
+	shouldAutoClean,
 } from "./shared.js";
 
 export function registerReviewCommand(program: Command): void {
@@ -37,14 +53,29 @@ export function registerReviewCommand(program: Command): void {
 		.action(async (options) => {
 			let config: Awaited<ReturnType<typeof loadConfig>> | undefined;
 			let lockAcquired = false;
-			let restoreConsole: (() => void) | undefined;
+			let restoreConsole: ConsoleLogHandle | undefined;
 			try {
 				config = await loadConfig();
-				restoreConsole = await startConsoleLog(config.project.log_dir);
-				await acquireLock(config.project.log_dir);
-				lockAcquired = true;
 
-				// Determine effective base branch
+				// Initialize debug logger
+				const globalConfig = await loadGlobalConfig();
+				const debugLogConfig = mergeDebugLogConfig(
+					config.project.debug_log,
+					globalConfig.debug_log,
+				);
+				initDebugLogger(config.project.log_dir, debugLogConfig);
+
+				// Log the command invocation
+				const debugLogger = getDebugLogger();
+				const args = [
+					options.baseBranch ? `-b ${options.baseBranch}` : "",
+					options.gate ? `-g ${options.gate}` : "",
+					options.commit ? `-c ${options.commit}` : "",
+					options.uncommitted ? "-u" : "",
+				].filter(Boolean);
+				await debugLogger?.logCommand("review", args);
+
+				// Determine effective base branch first (needed for auto-clean)
 				const effectiveBaseBranch =
 					options.baseBranch ||
 					(process.env.GITHUB_BASE_REF &&
@@ -53,9 +84,41 @@ export function registerReviewCommand(program: Command): void {
 						: null) ||
 					config.project.base_branch;
 
-				// Detect rerun mode: if logs exist and not targeting a specific commit, enter verification mode
+				// Detect rerun mode early: if logs exist, skip auto-clean
 				const logsExist = await hasExistingLogs(config.project.log_dir);
 				const isRerun = logsExist && !options.commit;
+
+				// Only auto-clean on first run, not during rerun/verification mode
+				if (!logsExist) {
+					const autoCleanResult = await shouldAutoClean(
+						config.project.log_dir,
+						effectiveBaseBranch,
+					);
+					if (autoCleanResult.clean) {
+						console.log(
+							chalk.dim(`Auto-cleaning logs (${autoCleanResult.reason})...`),
+						);
+						await debugLogger?.logClean(
+							"auto",
+							autoCleanResult.reason || "unknown",
+						);
+						await performAutoClean(config.project.log_dir, autoCleanResult);
+					}
+				}
+
+				// Acquire lock BEFORE starting console log (prevents orphaned log files)
+				await acquireLock(config.project.log_dir);
+				lockAcquired = true;
+
+				// Initialize Logger early to get unified run number for console log
+				const logger = new Logger(config.project.log_dir);
+				await logger.init();
+				const runNumber = logger.getRunNumber();
+
+				restoreConsole = await startConsoleLog(
+					config.project.log_dir,
+					runNumber,
+				);
 
 				let failuresMap:
 					| Map<string, Map<string, PreviousViolation[]>>
@@ -64,16 +127,20 @@ export function registerReviewCommand(program: Command): void {
 					| { commit?: string; uncommitted?: boolean; fixBase?: string }
 					| undefined;
 
+				let passedSlotsMap: Map<string, Map<number, PassedSlot>> | undefined;
+
 				if (isRerun) {
 					console.log(
 						chalk.dim(
 							"Existing logs detected — running in verification mode...",
 						),
 					);
-					const previousFailures = await findPreviousFailures(
-						config.project.log_dir,
-						options.gate,
-					);
+					const { failures: previousFailures, passedSlots } =
+						await findPreviousFailures(
+							config.project.log_dir,
+							options.gate,
+							true,
+						);
 
 					failuresMap = new Map();
 					for (const gateFailure of previousFailures) {
@@ -86,6 +153,8 @@ export function registerReviewCommand(program: Command): void {
 						}
 						failuresMap.set(gateFailure.jobId, adapterMap);
 					}
+
+					passedSlotsMap = passedSlots;
 
 					if (previousFailures.length > 0) {
 						const totalViolations = previousFailures.reduce(
@@ -105,14 +174,38 @@ export function registerReviewCommand(program: Command): void {
 					}
 
 					changeOptions = { uncommitted: true };
-					const fixBase = await readSessionRef(config.project.log_dir);
-					if (fixBase) {
-						changeOptions.fixBase = fixBase;
+					// Use working_tree_ref from execution state for rerun diff scoping
+					const executionState = await readExecutionState(
+						config.project.log_dir,
+					);
+					if (executionState?.working_tree_ref) {
+						changeOptions.fixBase = executionState.working_tree_ref;
 					}
-				} else if (options.commit || options.uncommitted) {
+				} else if (!logsExist) {
+					// Post-clean run: check if execution state has a working_tree_ref to use as fixBase
+					const executionState = await readExecutionState(
+						config.project.log_dir,
+					);
+					if (executionState) {
+						const resolved = await resolveFixBase(
+							executionState,
+							effectiveBaseBranch,
+						);
+						if (resolved.warning) {
+							console.log(chalk.yellow(`Warning: ${resolved.warning}`));
+						}
+						if (resolved.fixBase) {
+							changeOptions = { fixBase: resolved.fixBase };
+						}
+					}
+				}
+
+				// Allow explicit commit or uncommitted options to override fixBase
+				if (options.commit || options.uncommitted) {
 					changeOptions = {
 						commit: options.commit,
 						uncommitted: options.uncommitted,
+						fixBase: changeOptions?.fixBase,
 					};
 				}
 
@@ -131,8 +224,9 @@ export function registerReviewCommand(program: Command): void {
 
 				if (changes.length === 0) {
 					console.log(chalk.green("No changes detected."));
+					await writeExecutionState(config.project.log_dir);
 					await releaseLock(config.project.log_dir);
-					restoreConsole?.();
+					restoreConsole?.restore();
 					process.exit(0);
 				}
 
@@ -153,14 +247,18 @@ export function registerReviewCommand(program: Command): void {
 
 				if (jobs.length === 0) {
 					console.log(chalk.yellow("No applicable reviews for these changes."));
+					await writeExecutionState(config.project.log_dir);
 					await releaseLock(config.project.log_dir);
-					restoreConsole?.();
+					restoreConsole?.restore();
 					process.exit(0);
 				}
 
 				console.log(chalk.dim(`Running ${jobs.length} review(s)...`));
 
-				const logger = new Logger(config.project.log_dir);
+				// Log run start
+				const runMode = isRerun ? "verification" : "full";
+				await debugLogger?.logRunStart(runMode, changes.length, jobs.length);
+
 				const reporter = new ConsoleReporter();
 				const runner = new Runner(
 					config,
@@ -169,26 +267,45 @@ export function registerReviewCommand(program: Command): void {
 					failuresMap,
 					changeOptions,
 					effectiveBaseBranch,
+					passedSlotsMap,
+					debugLogger ?? undefined,
 				);
 
 				const success = await runner.run(jobs);
 
-				if (success) {
-					await cleanLogs(config.project.log_dir);
-				} else {
-					await writeSessionRef(config.project.log_dir);
-				}
+				// Log run end
+				await debugLogger?.logRunEnd(
+					success ? "pass" : "fail",
+					0,
+					0,
+					0,
+					logger.getRunNumber(),
+				);
 
+				// Write execution state before releasing lock (for interval checks)
+				// This now captures working_tree_ref which is used for rerun diff scoping
+				await writeExecutionState(config.project.log_dir);
+
+				if (success) {
+					await debugLogger?.logClean("auto", "all_passed");
+					await cleanLogs(config.project.log_dir);
+				}
 				await releaseLock(config.project.log_dir);
-				restoreConsole?.();
+				restoreConsole?.restore();
 				process.exit(success ? 0 : 1);
 			} catch (error: unknown) {
+				// Write execution state even on error (if lock was acquired)
 				if (config && lockAcquired) {
+					try {
+						await writeExecutionState(config.project.log_dir);
+					} catch {
+						// Ignore errors writing state during error handling
+					}
 					await releaseLock(config.project.log_dir);
 				}
 				const err = error as { message?: string };
 				console.error(chalk.red("Error:"), err.message);
-				restoreConsole?.();
+				restoreConsole?.restore();
 				process.exit(1);
 			}
 		});

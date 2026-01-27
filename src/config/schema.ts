@@ -56,6 +56,11 @@ export const entryPointSchema = z.object({
 	reviews: z.array(z.string().min(1)).optional(),
 });
 
+export const debugLogConfigSchema = z.object({
+	enabled: z.boolean().default(false),
+	max_size_mb: z.number().default(10),
+});
+
 export const gauntletConfigSchema = z.object({
 	base_branch: z.string().min(1).default("origin/main"),
 	log_dir: z.string().min(1).default("gauntlet_logs"),
@@ -66,4 +71,5 @@ export const gauntletConfigSchema = z.object({
 		.default("high"),
 	cli: cliConfigSchema,
 	entry_points: z.array(entryPointSchema).min(1),
+	debug_log: debugLogConfigSchema.optional(),
 });

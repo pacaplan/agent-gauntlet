@@ -52,17 +52,17 @@
 
 ## Validation Criteria
 
-- [ ] Scenario 1: When `num_reviews: 2` and slot 1 passed (slot 2 failed), slot 1 is skipped
-- [ ] Scenario 2: Slot can be skipped across multiple consecutive iterations
-- [ ] Scenario 3: When `num_reviews: 3` and all passed, slot 1 runs (safety latch), slots 2-3 skipped
-- [ ] Scenario 4: When `num_reviews: 1` and it passed, it still runs (invariant)
-- [ ] Scenario 5: Different review gates both run even if one passed
-- [ ] Scenario 6: Adapter change doesn't affect skip (decision based on review index)
-- [ ] Scenario 7: Log shows "Skipping @N: previously passed in iteration M (num_reviews > 1)"
-- [ ] Scenario 8: Log shows "Running @1: safety latch (all slots previously passed)" when latch activates
-- [ ] Scenario 9: Skipped slots don't count toward gate status
-- [ ] Scenario 10: Safety latch slot finding new issues causes gate to fail
-- [ ] Scenario 11: Slot with no prior log files must run
-- [ ] Scenario 12: Skipped slot produces JSON log with `status: "skipped_prior_pass"` and `passIteration` field
-- [ ] Console summary shows skipped review count
-- [ ] Existing tests continue to pass
+- [x] Scenario 1: When `num_reviews: 2` and slot 1 passed (slot 2 failed), slot 1 is skipped
+- [x] Scenario 2: Slot can be skipped across multiple consecutive iterations
+- [x] Scenario 3: When `num_reviews: 3` and all passed, slot 1 runs (safety latch), slots 2-3 skipped
+- [x] Scenario 4: When `num_reviews: 1` and it passed, it still runs (invariant)
+- [x] Scenario 5: Different review gates both run even if one passed
+- [x] Scenario 6: Adapter change doesn't affect skip (decision based on review index)
+- [x] Scenario 7: Log shows "Skipping @N: previously passed in iteration M (num_reviews > 1)"
+- [x] Scenario 8: Log shows "Running @1: safety latch (all slots previously passed)" when latch activates
+- [x] Scenario 9: Skipped slots don't count toward gate status
+- [x] Scenario 10: Safety latch slot finding new issues causes gate to fail
+- [x] Scenario 11: Slot with no prior log files must run
+- [x] Scenario 12: Skipped slot produces JSON log with `status: "skipped_prior_pass"` and `passIteration` field
+- [x] Console summary shows skipped review count
+- [x] Existing tests continue to pass

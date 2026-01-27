@@ -1,4 +1,4 @@
-import { exec } from "node:child_process";
+import { exec, spawn } from "node:child_process";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -165,6 +165,7 @@ ${escapedBody}
 		diff: string;
 		model?: string;
 		timeoutMs?: number;
+		onOutput?: (chunk: string) => void;
 	}): Promise<string> {
 		// Construct the full prompt content
 		const fullContent = `${opts.prompt}\n\n--- DIFF ---\n${opts.diff}`;
@@ -177,12 +178,82 @@ ${escapedBody}
 		);
 		await fs.writeFile(tmpFile, fullContent);
 
+		// Use gemini CLI with file input
+		// --sandbox: enables the execution sandbox
+		// --allowed-tools: whitelists read-only tools for non-interactive execution
+		// --output-format text: ensures plain text output
+		const args = [
+			"--sandbox",
+			"--allowed-tools",
+			"read_file,list_directory,glob,search_file_content",
+			"--output-format",
+			"text",
+		];
+
+		const cleanup = () => fs.unlink(tmpFile).catch(() => {});
+
+		// If onOutput callback is provided, use spawn for real-time streaming
+		if (opts.onOutput) {
+			return new Promise((resolve, reject) => {
+				const chunks: string[] = [];
+				const inputStream = fs.open(tmpFile, "r").then((handle) => {
+					const stream = handle.createReadStream();
+					return { stream, handle };
+				});
+
+				inputStream
+					.then(({ stream, handle }) => {
+						const child = spawn("gemini", args, {
+							stdio: ["pipe", "pipe", "pipe"],
+						});
+
+						stream.pipe(child.stdin);
+
+						let timeoutId: ReturnType<typeof setTimeout> | undefined;
+						if (opts.timeoutMs) {
+							timeoutId = setTimeout(() => {
+								child.kill("SIGTERM");
+								reject(new Error("Command timed out"));
+							}, opts.timeoutMs);
+						}
+
+						child.stdout.on("data", (data: Buffer) => {
+							const chunk = data.toString();
+							chunks.push(chunk);
+							opts.onOutput?.(chunk);
+						});
+
+						child.stderr.on("data", (data: Buffer) => {
+							// Only log stderr, don't include in return value
+							opts.onOutput?.(data.toString());
+						});
+
+						child.on("close", (code) => {
+							if (timeoutId) clearTimeout(timeoutId);
+							handle.close().catch(() => {});
+							cleanup().then(() => {
+								if (code === 0 || code === null) {
+									resolve(chunks.join(""));
+								} else {
+									reject(new Error(`Process exited with code ${code}`));
+								}
+							});
+						});
+
+						child.on("error", (err) => {
+							if (timeoutId) clearTimeout(timeoutId);
+							handle.close().catch(() => {});
+							cleanup().then(() => reject(err));
+						});
+					})
+					.catch((err) => {
+						cleanup().then(() => reject(err));
+					});
+			});
+		}
+
+		// Otherwise use exec for buffered output
 		try {
-			// Use gemini CLI with file input
-			// --sandbox: enables the execution sandbox
-			// --allowed-tools: whitelists read-only tools for non-interactive execution
-			// --output-format text: ensures plain text output
-			// Use < for stdin redirection instead of cat pipe (cleaner)
 			const cmd = `gemini --sandbox --allowed-tools read_file,list_directory,glob,search_file_content --output-format text < "${tmpFile}"`;
 			const { stdout } = await execAsync(cmd, {
 				timeout: opts.timeoutMs,
@@ -190,7 +261,7 @@ ${escapedBody}
 			});
 			return stdout;
 		} finally {
-			await fs.unlink(tmpFile).catch(() => {});
+			await cleanup();
 		}
 	}
 }

@@ -1,24 +1,6 @@
-import chalk from "chalk";
 import type { Command } from "commander";
-import { loadConfig } from "../config/loader.js";
-import { ChangeDetector } from "../core/change-detector.js";
-import { EntryPointExpander } from "../core/entry-point.js";
-import { JobGenerator } from "../core/job.js";
-import { Runner } from "../core/runner.js";
-import { ConsoleReporter } from "../output/console.js";
-import { startConsoleLog } from "../output/console-log.js";
-import { Logger } from "../output/logger.js";
-import {
-	findPreviousFailures,
-	type PreviousViolation,
-} from "../utils/log-parser.js";
-import { readSessionRef, writeSessionRef } from "../utils/session-ref.js";
-import {
-	acquireLock,
-	cleanLogs,
-	hasExistingLogs,
-	releaseLock,
-} from "./shared.js";
+import { executeRun } from "../core/run-executor.js";
+import { isSuccessStatus } from "../types/gauntlet-status.js";
 
 export function registerRunCommand(program: Command): void {
 	program
@@ -35,159 +17,13 @@ export function registerRunCommand(program: Command): void {
 			"Use diff for current uncommitted changes (staged and unstaged)",
 		)
 		.action(async (options) => {
-			let config: Awaited<ReturnType<typeof loadConfig>> | undefined;
-			let lockAcquired = false;
-			let restoreConsole: (() => void) | undefined;
-			try {
-				config = await loadConfig();
-				restoreConsole = await startConsoleLog(config.project.log_dir);
-				await acquireLock(config.project.log_dir);
-				lockAcquired = true;
+			const result = await executeRun({
+				baseBranch: options.baseBranch,
+				gate: options.gate,
+				commit: options.commit,
+				uncommitted: options.uncommitted,
+			});
 
-				// Determine effective base branch
-				const effectiveBaseBranch =
-					options.baseBranch ||
-					(process.env.GITHUB_BASE_REF &&
-					(process.env.CI === "true" || process.env.GITHUB_ACTIONS === "true")
-						? process.env.GITHUB_BASE_REF
-						: null) ||
-					config.project.base_branch;
-
-				// Detect rerun mode: if logs exist and not targeting a specific commit, enter verification mode
-				const logsExist = await hasExistingLogs(config.project.log_dir);
-				const isRerun = logsExist && !options.commit;
-
-				let failuresMap:
-					| Map<string, Map<string, PreviousViolation[]>>
-					| undefined;
-				let changeOptions:
-					| { commit?: string; uncommitted?: boolean; fixBase?: string }
-					| undefined;
-
-				if (isRerun) {
-					console.log(
-						chalk.dim(
-							"Existing logs detected — running in verification mode...",
-						),
-					);
-					const previousFailures = await findPreviousFailures(
-						config.project.log_dir,
-						options.gate,
-					);
-
-					failuresMap = new Map();
-					for (const gateFailure of previousFailures) {
-						const adapterMap = new Map<string, PreviousViolation[]>();
-						for (const af of gateFailure.adapterFailures) {
-							// Use review index as key if available (new @index pattern)
-							const key = af.reviewIndex
-								? String(af.reviewIndex)
-								: af.adapterName;
-							adapterMap.set(key, af.violations);
-						}
-						failuresMap.set(gateFailure.jobId, adapterMap);
-					}
-
-					if (previousFailures.length > 0) {
-						const totalViolations = previousFailures.reduce(
-							(sum, gf) =>
-								sum +
-								gf.adapterFailures.reduce(
-									(s, af) => s + af.violations.length,
-									0,
-								),
-							0,
-						);
-						console.log(
-							chalk.yellow(
-								`Found ${previousFailures.length} gate(s) with ${totalViolations} previous violation(s)`,
-							),
-						);
-					}
-
-					changeOptions = { uncommitted: true };
-					const fixBase = await readSessionRef(config.project.log_dir);
-					if (fixBase) {
-						changeOptions.fixBase = fixBase;
-					}
-				} else if (options.commit || options.uncommitted) {
-					changeOptions = {
-						commit: options.commit,
-						uncommitted: options.uncommitted,
-					};
-				}
-
-				const changeDetector = new ChangeDetector(
-					effectiveBaseBranch,
-					changeOptions || {
-						commit: options.commit,
-						uncommitted: options.uncommitted,
-					},
-				);
-				const expander = new EntryPointExpander();
-				const jobGen = new JobGenerator(config);
-
-				console.log(chalk.dim("Detecting changes..."));
-				const changes = await changeDetector.getChangedFiles();
-
-				if (changes.length === 0) {
-					console.log(chalk.green("No changes detected."));
-					await releaseLock(config.project.log_dir);
-					restoreConsole?.();
-					process.exit(0);
-				}
-
-				console.log(chalk.dim(`Found ${changes.length} changed files.`));
-
-				const entryPoints = await expander.expand(
-					config.project.entry_points,
-					changes,
-				);
-				let jobs = jobGen.generateJobs(entryPoints);
-
-				if (options.gate) {
-					jobs = jobs.filter((j) => j.name === options.gate);
-				}
-
-				if (jobs.length === 0) {
-					console.log(chalk.yellow("No applicable gates for these changes."));
-					await releaseLock(config.project.log_dir);
-					restoreConsole?.();
-					process.exit(0);
-				}
-
-				console.log(chalk.dim(`Running ${jobs.length} gates...`));
-
-				const logger = new Logger(config.project.log_dir);
-				const reporter = new ConsoleReporter();
-				const runner = new Runner(
-					config,
-					logger,
-					reporter,
-					failuresMap,
-					changeOptions,
-					effectiveBaseBranch,
-				);
-
-				const success = await runner.run(jobs);
-
-				if (success) {
-					await cleanLogs(config.project.log_dir);
-				} else {
-					await writeSessionRef(config.project.log_dir);
-				}
-
-				await releaseLock(config.project.log_dir);
-				restoreConsole?.();
-				process.exit(success ? 0 : 1);
-			} catch (error: unknown) {
-				if (config && lockAcquired) {
-					await releaseLock(config.project.log_dir);
-				}
-				const err = error as { message?: string };
-				console.error(chalk.red("Error:"), err.message);
-				restoreConsole?.();
-				process.exit(1);
-			}
+			process.exit(isSuccessStatus(result.status) ? 0 : 1);
 		});
 }

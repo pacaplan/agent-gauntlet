@@ -12,6 +12,7 @@ import {
 	registerListCommand,
 	registerReviewCommand,
 	registerRunCommand,
+	registerStopHookCommand,
 	registerValidateCommand,
 } from "./commands/index.js";
 
@@ -33,6 +34,7 @@ registerListCommand(program);
 registerHealthCommand(program);
 registerInitCommand(program);
 registerValidateCommand(program);
+registerStopHookCommand(program);
 registerHelpCommand(program);
 
 // Default action: help

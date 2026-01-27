@@ -63,9 +63,7 @@ describe("Logger run-numbered filenames", () => {
 			"claude",
 			1,
 		);
-		expect(path.basename(claudePath)).toBe(
-			"review_src_quality_claude@1.3.log",
-		);
+		expect(path.basename(claudePath)).toBe("review_src_quality_claude@1.3.log");
 
 		// Different adapter same run number
 		const geminiPath = await logger.getLogPath(
@@ -73,9 +71,7 @@ describe("Logger run-numbered filenames", () => {
 			"gemini",
 			2,
 		);
-		expect(path.basename(geminiPath)).toBe(
-			"review_src_quality_gemini@2.3.log",
-		);
+		expect(path.basename(geminiPath)).toBe("review_src_quality_gemini@2.3.log");
 	});
 
 	it("getRunNumber returns the computed global run number", async () => {

@@ -7,4 +7,4 @@ deps = "bun install"
 
 # Pre-Merge: run gauntlet checks before merging back
 [pre-merge]
-check = "bun src/index.ts check"
+check = "bun src/index.ts clean && bun src/index.ts check"

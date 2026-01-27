@@ -1,8 +1,89 @@
 import fs from "node:fs/promises";
 import path from "node:path";
-import { clearSessionRef } from "../utils/session-ref";
+import {
+	getDebugLogBackupFilename,
+	getDebugLogFilename,
+} from "../utils/debug-log.js";
+import {
+	deleteExecutionState,
+	getCurrentBranch,
+	getExecutionStateFilename,
+	isCommitInBranch,
+	readExecutionState,
+} from "../utils/execution-state.js";
 
 const LOCK_FILENAME = ".gauntlet-run.lock";
+const SESSION_REF_FILENAME = ".session_ref";
+
+export interface AutoCleanResult {
+	clean: boolean;
+	reason?: string;
+	resetState?: boolean;
+}
+
+/**
+ * Check if logs should be auto-cleaned based on execution context changes.
+ * Returns { clean: true, reason, resetState } if context has changed.
+ * Returns { clean: false } if context is unchanged or state file doesn't exist.
+ * When resetState is true, the execution state should be deleted (not just logs).
+ */
+export async function shouldAutoClean(
+	logDir: string,
+	baseBranch: string,
+): Promise<AutoCleanResult> {
+	const state = await readExecutionState(logDir);
+
+	// No state file = no auto-clean needed
+	if (!state) {
+		return { clean: false };
+	}
+
+	// Check if branch changed
+	try {
+		const currentBranch = await getCurrentBranch();
+		if (currentBranch !== state.branch) {
+			return { clean: true, reason: "branch changed", resetState: true };
+		}
+	} catch {
+		// If we can't get the current branch, don't auto-clean
+		return { clean: false };
+	}
+
+	// Check if commit was merged into base branch
+	try {
+		const isMerged = await isCommitInBranch(state.commit, baseBranch);
+		if (isMerged) {
+			return { clean: true, reason: "commit merged", resetState: true };
+		}
+	} catch {
+		// If we can't check merge status, don't auto-clean
+	}
+
+	return { clean: false };
+}
+
+/**
+ * Perform auto-clean with state reset if needed.
+ */
+export async function performAutoClean(
+	logDir: string,
+	result: AutoCleanResult,
+): Promise<void> {
+	await cleanLogs(logDir);
+
+	// Delete execution state if context changed (branch changed or commit merged)
+	if (result.resetState) {
+		await deleteExecutionState(logDir);
+	}
+}
+
+/**
+ * Get the lock filename constant.
+ * Useful for checking lock status from other modules.
+ */
+export function getLockFilename(): string {
+	return LOCK_FILENAME;
+}
 
 export async function exists(filePath: string): Promise<boolean> {
 	try {
@@ -50,7 +131,44 @@ export async function hasExistingLogs(logDir: string): Promise<boolean> {
 	try {
 		const entries = await fs.readdir(logDir);
 		return entries.some(
-			(f) => (f.endsWith(".log") || f.endsWith(".json")) && f !== "previous",
+			(f) =>
+				(f.endsWith(".log") || f.endsWith(".json")) &&
+				f !== "previous" &&
+				!f.startsWith("console.") &&
+				!f.startsWith("."),
+		);
+	} catch {
+		return false;
+	}
+}
+
+/**
+ * Get the set of persistent files that should never be moved during clean.
+ */
+function getPersistentFiles(): Set<string> {
+	return new Set([
+		getExecutionStateFilename(),
+		getDebugLogFilename(),
+		getDebugLogBackupFilename(),
+		LOCK_FILENAME,
+		SESSION_REF_FILENAME, // Will be deleted, not moved
+	]);
+}
+
+/**
+ * Check if there are current logs to archive.
+ * Returns true if there are .log or .json files in the log directory root.
+ * Excludes persistent files (.execution_state, .debug.log, etc.)
+ */
+async function hasCurrentLogs(logDir: string): Promise<boolean> {
+	try {
+		const files = await fs.readdir(logDir);
+		const persistentFiles = getPersistentFiles();
+		return files.some(
+			(f) =>
+				(f.endsWith(".log") || f.endsWith(".json")) &&
+				f !== "previous" &&
+				!persistentFiles.has(f),
 		);
 	} catch {
 		return false;
@@ -61,7 +179,13 @@ export async function cleanLogs(logDir: string): Promise<void> {
 	const previousDir = path.join(logDir, "previous");
 
 	try {
+		// Guard: Return early if log directory doesn't exist
 		if (!(await exists(logDir))) {
+			return;
+		}
+
+		// Guard: Return early if no current logs to archive
+		if (!(await hasCurrentLogs(logDir))) {
 			return;
 		}
 
@@ -77,17 +201,26 @@ export async function cleanLogs(logDir: string): Promise<void> {
 			await fs.mkdir(previousDir, { recursive: true });
 		}
 
-		// 2. Move all .log and .json files from logDir root into previous/
+		// 2. Move log/json files from logDir root into previous/
+		// EXCLUDE persistent files: .execution_state, .debug.log, .debug.log.1, lock file
 		const files = await fs.readdir(logDir);
+		const persistentFiles = getPersistentFiles();
+
 		await Promise.all(
 			files
-				.filter((file) => file.endsWith(".log") || file.endsWith(".json"))
+				.filter((file) => file !== "previous" && !persistentFiles.has(file))
 				.map((file) =>
 					fs.rename(path.join(logDir, file), path.join(previousDir, file)),
 				),
 		);
 
-		await clearSessionRef(logDir);
+		// 3. Delete legacy .session_ref if it exists (migration cleanup)
+		try {
+			const sessionRefPath = path.join(logDir, SESSION_REF_FILENAME);
+			await fs.rm(sessionRefPath, { force: true });
+		} catch {
+			// Ignore errors
+		}
 	} catch (error) {
 		console.warn(
 			"Failed to clean logs in",

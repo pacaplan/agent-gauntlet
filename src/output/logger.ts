@@ -18,8 +18,8 @@ async function computeGlobalRunNumber(logDir: string): Promise<number> {
 			if (!file.endsWith(".log") && !file.endsWith(".json")) continue;
 			// Pattern: <anything>.<number>.(log|json)
 			const m = file.match(/\.(\d+)\.(log|json)$/);
-			if (m) {
-				const n = parseInt(m[1]!, 10);
+			if (m?.[1]) {
+				const n = parseInt(m[1], 10);
 				if (n > max) max = n;
 			}
 		}

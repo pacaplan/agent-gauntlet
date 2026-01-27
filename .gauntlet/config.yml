@@ -30,3 +30,6 @@ entry_points:
       - openspec-validate
     reviews:
       - change-review
+  - path: "openspec/changes/*/tasks.md"
+    reviews:
+      - task-review      

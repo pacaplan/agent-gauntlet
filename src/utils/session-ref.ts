@@ -1,3 +1,10 @@
+/**
+ * @deprecated This module is deprecated.
+ * Session reference is now stored in .execution_state as working_tree_ref.
+ * See src/utils/execution-state.ts for the new implementation.
+ * This file is kept for backward compatibility cleanup only.
+ */
+
 import { exec } from "node:child_process";
 import fs from "node:fs/promises";
 import path from "node:path";

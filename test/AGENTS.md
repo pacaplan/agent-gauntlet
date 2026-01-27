@@ -43,49 +43,63 @@ This document provides guidelines for writing tests that work reliably in both l
    mock.module("../../src/cli-adapters/index.js", () => ({...}));
    ```
 
-### 2. Git Command Failures
+### 2. Shell Command and Git Operations
 
-**Problem**: Tests that rely on git commands fail in CI due to shallow clones, missing history, or different git configurations.
+**Problem**: Tests that rely on shell commands (especially git) fail in CI due to shallow clones, detached HEAD state, missing history, or different configurations.
 
-**Solutions**:
+**Preferred Solution: Mock shell commands using `spyOn`**
 
-1. **Create isolated git repositories for tests**:
-   ```typescript
-   const TEST_DIR = path.join("/tmp", `test-${Date.now()}`);
-   
-   beforeEach(async () => {
-     await fs.mkdir(TEST_DIR, { recursive: true });
-     process.chdir(TEST_DIR);
-     await execAsync("git init");
-     await execAsync('git config user.email "test@test.com"');
-     await execAsync('git config user.name "Test"');
-     // Create initial commit
-   });
-   
-   afterEach(async () => {
-     process.chdir(originalCwd);
-     await fs.rm(TEST_DIR, { recursive: true, force: true });
-   });
-   ```
+Mocking is preferred because:
+- Tests are fast (no process spawning)
+- Tests are deterministic (same output every time)
+- No environment dependencies
+- Easy to test error conditions
 
-2. **Disable CI mode in tests that need full git functionality**:
-   ```typescript
-   beforeEach(() => {
-     originalCI = process.env.CI;
-     delete process.env.CI;
-     delete process.env.GITHUB_ACTIONS;
-   });
-   
-   afterEach(() => {
-     if (originalCI) process.env.CI = originalCI;
-   });
-   ```
+```typescript
+import { spyOn } from "bun:test";
+import * as childProcess from "node:child_process";
+import { EventEmitter } from "node:events";
 
-3. **Mock git operations entirely when testing non-git functionality**:
-   ```typescript
-   // Patch getDiff to return mock content instead of running real git commands
-   (executor as any).getDiff = async () => "mock diff content";
-   ```
+// Helper to create a mock spawn process
+function createMockSpawn(stdout: string, exitCode: number) {
+  const mockProcess = new EventEmitter() as EventEmitter & {
+    stdout: EventEmitter;
+    stderr: EventEmitter;
+  };
+  mockProcess.stdout = new EventEmitter();
+  mockProcess.stderr = new EventEmitter();
+
+  setImmediate(() => {
+    if (stdout) {
+      mockProcess.stdout.emit("data", Buffer.from(stdout));
+    }
+    mockProcess.emit("close", exitCode);
+  });
+
+  return mockProcess;
+}
+
+// In your test:
+let spawnSpy: ReturnType<typeof spyOn>;
+
+beforeEach(() => {
+  spawnSpy = spyOn(childProcess, "spawn").mockImplementation((cmd, args) => {
+    const argsArray = args as string[];
+    if (argsArray.includes("--abbrev-ref")) {
+      return createMockSpawn("main\n", 0) as ReturnType<typeof childProcess.spawn>;
+    }
+    if (argsArray.includes("rev-parse")) {
+      return createMockSpawn("abc123...\n", 0) as ReturnType<typeof childProcess.spawn>;
+    }
+    // Default
+    return createMockSpawn("", 0) as ReturnType<typeof childProcess.spawn>;
+  });
+});
+
+afterEach(() => {
+  mock.restore();
+});
+```
 
 ### 3. Environment Differences
 
@@ -163,3 +177,7 @@ bun test --verbose
 3. Follow the patterns above for mocking
 4. Ensure tests clean up after themselves
 5. Run tests locally AND verify they pass in CI before merging
+
+## Anti-patterns to avoid
+- ❌ Don't skip tests in CI - tests should run everywhere
+
