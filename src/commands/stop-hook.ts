@@ -505,6 +505,7 @@ export function registerStopHookCommand(program: Command): void {
 							? getStopReasonInstructions(result.consoleLogPath ?? null)
 							: undefined,
 					errorMessage: result.errorMessage,
+					intervalMinutes: result.intervalMinutes,
 				});
 
 				// Clean up logger

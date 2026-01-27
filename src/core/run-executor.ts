@@ -244,6 +244,7 @@ export async function executeRun(
 					return {
 						status: "interval_not_elapsed",
 						message: `Run interval (${intervalMinutes} min) not elapsed.`,
+						intervalMinutes,
 					};
 				}
 			}
