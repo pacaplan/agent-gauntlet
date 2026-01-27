@@ -52,6 +52,12 @@ export interface ExecuteRunOptions {
 	uncommitted?: boolean;
 	/** Working directory for config loading (defaults to process.cwd()) */
 	cwd?: string;
+	/**
+	 * When true, check if run interval has elapsed before proceeding.
+	 * Only stop-hook uses this; CLI commands (run, check, review) always run immediately.
+	 * If interval hasn't elapsed, returns { status: "interval_not_elapsed", ... }.
+	 */
+	checkInterval?: boolean;
 }
 
 /**
@@ -104,6 +110,32 @@ async function findLatestConsoleLog(logDir: string): Promise<string | null> {
 	} catch {
 		return null;
 	}
+}
+
+/**
+ * Check if the run interval has elapsed since the last gauntlet run.
+ * Returns true if gauntlet should run, false if interval hasn't elapsed.
+ */
+async function shouldRunBasedOnInterval(
+	logDir: string,
+	intervalMinutes: number,
+): Promise<boolean> {
+	const state = await readExecutionState(logDir);
+	if (!state) {
+		// No execution state = always run
+		return true;
+	}
+
+	const lastRun = new Date(state.last_run_completed_at);
+	// Handle invalid date (corrupted state) - treat as needing to run
+	if (Number.isNaN(lastRun.getTime())) {
+		return true;
+	}
+
+	const now = new Date();
+	const elapsedMinutes = (now.getTime() - lastRun.getTime()) / (1000 * 60);
+
+	return elapsedMinutes >= intervalMinutes;
 }
 
 /**
@@ -186,8 +218,36 @@ export async function executeRun(
 			options.gate ? `-g ${options.gate}` : "",
 			options.commit ? `-c ${options.commit}` : "",
 			options.uncommitted ? "-u" : "",
+			options.checkInterval ? "--check-interval" : "",
 		].filter(Boolean);
 		await debugLogger?.logCommand("run", args);
+
+		// Interval check: only stop-hook passes checkInterval: true
+		// CLI commands (run, check, review) always run immediately
+		if (options.checkInterval) {
+			const logsExist = await hasExistingLogs(config.project.log_dir);
+			// Only check interval if there are no existing logs (not in rerun mode)
+			if (!logsExist) {
+				const intervalMinutes = globalConfig.stop_hook.run_interval_minutes;
+				const shouldRun = await shouldRunBasedOnInterval(
+					config.project.log_dir,
+					intervalMinutes,
+				);
+				if (!shouldRun) {
+					log.debug(
+						`Run interval (${intervalMinutes} min) not elapsed, skipping`,
+					);
+					// Clean up logger if we initialized it
+					if (loggerInitializedHere) {
+						await resetLogger();
+					}
+					return {
+						status: "interval_not_elapsed",
+						message: `Run interval (${intervalMinutes} min) not elapsed.`,
+					};
+				}
+			}
+		}
 
 		// Determine effective base branch first (needed for auto-clean)
 		const effectiveBaseBranch =

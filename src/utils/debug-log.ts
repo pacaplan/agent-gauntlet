@@ -145,6 +145,37 @@ export class DebugLogger {
 	}
 
 	/**
+	 * Log stop hook diagnostic information.
+	 * Used to debug duplicate/unexpected stop hook invocations.
+	 */
+	async logStopHookDiagnostics(_diagnostics: {
+		pid: number;
+		ppid: number;
+		envVarSet: boolean;
+		processCwd: string;
+		rawStdin: string;
+		stdinSessionId?: string;
+		stdinStopHookActive?: boolean;
+		stdinCwd?: string;
+		stdinHookEventName?: string;
+	}): Promise<void> {
+		// TODO convert this class to use logtape and log this at debug level
+		// Format as key=value pairs, escaping values that might contain spaces
+		// const parts = [
+		// 	"STOP_HOOK_DIAG",
+		// 	`pid=${diagnostics.pid}`,
+		// 	`ppid=${diagnostics.ppid}`,
+		// 	`env_var_set=${diagnostics.envVarSet}`,
+		// 	`session_id=${diagnostics.stdinSessionId ?? "none"}`,
+		// 	`stop_hook_active=${diagnostics.stdinStopHookActive ?? "none"}`,
+		// 	`hook_event=${diagnostics.stdinHookEventName ?? "none"}`,
+		// 	`stdin_cwd=${diagnostics.stdinCwd ?? "none"}`,
+		// 	`process_cwd=${diagnostics.processCwd}`,
+		// ];
+		// await this.write(parts.join(" "));
+	}
+
+	/**
 	 * Write a log entry with timestamp.
 	 */
 	private async write(message: string): Promise<void> {

@@ -61,3 +61,124 @@ describe("console-log.ts stderr capture", () => {
 		expect(stderrWrite).not.toBeNull();
 	});
 });
+
+describe("run-executor checkInterval option", () => {
+	describe("ExecuteRunOptions interface", () => {
+		it("should have checkInterval option in the interface", () => {
+			const sourceFile = readFileSync(
+				join(process.cwd(), "src/core/run-executor.ts"),
+				"utf-8",
+			);
+
+			// Should have checkInterval in interface
+			expect(sourceFile).toContain("checkInterval?: boolean");
+		});
+	});
+
+	describe("interval checking logic", () => {
+		it("should include shouldRunBasedOnInterval function", () => {
+			const sourceFile = readFileSync(
+				join(process.cwd(), "src/core/run-executor.ts"),
+				"utf-8",
+			);
+
+			// Should have the interval checking function
+			expect(sourceFile).toContain("shouldRunBasedOnInterval");
+			expect(sourceFile).toContain("intervalMinutes");
+		});
+
+		it("should check interval before lock acquisition when checkInterval is true", () => {
+			const sourceFile = readFileSync(
+				join(process.cwd(), "src/core/run-executor.ts"),
+				"utf-8",
+			);
+
+			// Find positions of interval check and lock acquisition
+			const intervalCheckPos = sourceFile.indexOf("options.checkInterval");
+			const lockAcquisitionPos = sourceFile.indexOf("tryAcquireLock");
+
+			// Interval check should appear before lock acquisition in the executeRun function
+			const executeRunStart = sourceFile.indexOf(
+				"export async function executeRun",
+			);
+			const intervalCheckInExecute = sourceFile.indexOf(
+				"options.checkInterval",
+				executeRunStart,
+			);
+			const lockAcquisitionInExecute = sourceFile.indexOf(
+				"await tryAcquireLock",
+				executeRunStart,
+			);
+
+			expect(intervalCheckInExecute).toBeLessThan(lockAcquisitionInExecute);
+		});
+
+		it("should check interval before auto-clean when checkInterval is true", () => {
+			const sourceFile = readFileSync(
+				join(process.cwd(), "src/core/run-executor.ts"),
+				"utf-8",
+			);
+
+			// Find positions of interval check and auto-clean
+			const executeRunStart = sourceFile.indexOf(
+				"export async function executeRun",
+			);
+			const intervalCheckInExecute = sourceFile.indexOf(
+				"options.checkInterval",
+				executeRunStart,
+			);
+			const autoCleanInExecute = sourceFile.indexOf(
+				"shouldAutoClean",
+				executeRunStart,
+			);
+
+			expect(intervalCheckInExecute).toBeLessThan(autoCleanInExecute);
+		});
+
+		it("should return interval_not_elapsed status when interval has not elapsed", () => {
+			const sourceFile = readFileSync(
+				join(process.cwd(), "src/core/run-executor.ts"),
+				"utf-8",
+			);
+
+			// Should return interval_not_elapsed status
+			expect(sourceFile).toContain('"interval_not_elapsed"');
+			expect(sourceFile).toContain("status: \"interval_not_elapsed\"");
+		});
+
+		it("should only check interval when no existing logs (not in rerun mode)", () => {
+			const sourceFile = readFileSync(
+				join(process.cwd(), "src/core/run-executor.ts"),
+				"utf-8",
+			);
+
+			// Should have logic to skip interval check when logs exist
+			expect(sourceFile).toMatch(
+				/checkInterval[\s\S]*hasExistingLogs[\s\S]*!logsExist/,
+			);
+		});
+	});
+
+	describe("CLI commands behavior", () => {
+		it("run command should not pass checkInterval (source verification)", () => {
+			const sourceFile = readFileSync(
+				join(process.cwd(), "src/commands/run.ts"),
+				"utf-8",
+			);
+
+			// run command should call executeRun without checkInterval
+			// It should NOT contain checkInterval: true
+			expect(sourceFile).not.toContain("checkInterval: true");
+		});
+
+		it("stop-hook should pass checkInterval: true (source verification)", () => {
+			const sourceFile = readFileSync(
+				join(process.cwd(), "src/commands/stop-hook.ts"),
+				"utf-8",
+			);
+
+			// stop-hook should call executeRun with checkInterval: true
+			expect(sourceFile).toContain("checkInterval: true");
+		});
+	});
+});

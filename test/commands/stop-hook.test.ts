@@ -32,7 +32,6 @@ mock.module("node:child_process", () => {
 const {
 	registerStopHookCommand,
 	getStopReasonInstructions,
-	findLatestConsoleLog,
 	outputHookResponse,
 	getStatusMessage,
 } = await import("../../src/commands/stop-hook.js");
@@ -364,70 +363,6 @@ describe("Stop Hook Command", () => {
 			expect(instructions).toContain("Status: Passed with warnings");
 			expect(instructions).toContain("Status: Retry limit exceeded");
 			expect(instructions).toContain("**Termination conditions:**");
-		});
-	});
-
-	describe("findLatestConsoleLog", () => {
-		it("should find the highest numbered console log file", async () => {
-			await fs.mkdir(path.join(TEST_DIR, "gauntlet_logs"), { recursive: true });
-			await fs.writeFile(
-				path.join(TEST_DIR, "gauntlet_logs", "console.1.log"),
-				"log1",
-			);
-			await fs.writeFile(
-				path.join(TEST_DIR, "gauntlet_logs", "console.3.log"),
-				"log3",
-			);
-			await fs.writeFile(
-				path.join(TEST_DIR, "gauntlet_logs", "console.2.log"),
-				"log2",
-			);
-
-			const latestLog = await findLatestConsoleLog(
-				path.join(TEST_DIR, "gauntlet_logs"),
-			);
-			expect(latestLog).toBe(
-				path.join(TEST_DIR, "gauntlet_logs", "console.3.log"),
-			);
-		});
-
-		it("should return null when no console logs exist", async () => {
-			await fs.mkdir(path.join(TEST_DIR, "gauntlet_logs"), { recursive: true });
-
-			const latestLog = await findLatestConsoleLog(
-				path.join(TEST_DIR, "gauntlet_logs"),
-			);
-			expect(latestLog).toBeNull();
-		});
-
-		it("should return null when log directory does not exist", async () => {
-			const latestLog = await findLatestConsoleLog(
-				path.join(TEST_DIR, "nonexistent"),
-			);
-			expect(latestLog).toBeNull();
-		});
-
-		it("should ignore non-console log files", async () => {
-			await fs.mkdir(path.join(TEST_DIR, "gauntlet_logs"), { recursive: true });
-			await fs.writeFile(
-				path.join(TEST_DIR, "gauntlet_logs", "other.log"),
-				"other",
-			);
-			await fs.writeFile(
-				path.join(TEST_DIR, "gauntlet_logs", "console.1.log"),
-				"log1",
-			);
-			await fs.writeFile(
-				path.join(TEST_DIR, "gauntlet_logs", "console.txt"),
-				"txt",
-			);
-
-			const latestLog = await findLatestConsoleLog(
-				path.join(TEST_DIR, "gauntlet_logs"),
-			);
-			expect(latestLog).toBe(
-				path.join(TEST_DIR, "gauntlet_logs", "console.1.log"),
-			);
 		});
 	});
 
@@ -899,6 +834,41 @@ describe("Stop Hook Command", () => {
 			}
 		});
 
+		it("should not log when stop_hook_active is set in stdin input", async () => {
+			// Read source to verify no debug logging happens for stop_hook_active case
+			const { readFileSync } = await import("node:fs");
+			const sourceFile = readFileSync(
+				path.join(originalCwd, "src/commands/stop-hook.ts"),
+				"utf-8",
+			);
+
+			// Find action handler
+			const actionStart = sourceFile.indexOf(".action(async ()");
+
+			// Find stop_hook_active check from input
+			const stopHookActiveCheck = sourceFile.indexOf(
+				"hookInput.stop_hook_active",
+				actionStart,
+			);
+
+			// Find where debug logger is initialized
+			const debugLoggerInit = sourceFile.indexOf(
+				"new DebugLogger",
+				actionStart,
+			);
+
+			// stop_hook_active check should come BEFORE debug logger initialization
+			// This means no debug logging happens for this case
+			expect(stopHookActiveCheck).toBeLessThan(debugLoggerInit);
+
+			// Verify the stop_hook_active block doesn't contain debugLogger calls
+			const stopHookActiveBlock = sourceFile.slice(
+				stopHookActiveCheck,
+				sourceFile.indexOf("return;", stopHookActiveCheck) + 10,
+			);
+			expect(stopHookActiveBlock).not.toContain("debugLogger");
+		});
+
 		it("should not initialize debug logger when child process detected", async () => {
 			// This test verifies the code path - debug logger init happens AFTER the child process check
 			// So when GAUNTLET_STOP_HOOK_ACTIVE is set, no debug logging should occur
@@ -932,6 +902,129 @@ describe("Stop Hook Command", () => {
 			} finally {
 				delete process.env.GAUNTLET_STOP_HOOK_ACTIVE;
 			}
+		});
+	});
+
+	describe("simplified architecture (stop-hook delegates to executor)", () => {
+		it("should check config BEFORE stdin parsing (avoid 5s timeout)", async () => {
+			// Read source file to verify order of operations
+			const { readFileSync } = await import("node:fs");
+			const sourceFile = readFileSync(
+				path.join(originalCwd, "src/commands/stop-hook.ts"),
+				"utf-8",
+			);
+
+			// Find positions in the action handler
+			const actionStart = sourceFile.indexOf(".action(async ()");
+			const quickConfigCheck = sourceFile.indexOf(
+				"quickConfigCheck",
+				actionStart,
+			);
+			const stdinInAction = sourceFile.indexOf("readStdin", actionStart);
+
+			// Config check should appear BEFORE stdin read
+			expect(quickConfigCheck).toBeLessThan(stdinInAction);
+		});
+
+		it("should check env var BEFORE stdin parsing (fast exit)", async () => {
+			// Read source file to verify order of operations
+			const { readFileSync } = await import("node:fs");
+			const sourceFile = readFileSync(
+				path.join(originalCwd, "src/commands/stop-hook.ts"),
+				"utf-8",
+			);
+
+			// Find positions of env var check and stdin parsing
+			const envVarCheckPos = sourceFile.indexOf(
+				"GAUNTLET_STOP_HOOK_ACTIVE_ENV",
+			);
+			const stdinParsePos = sourceFile.indexOf("readStdin");
+
+			// The env var check should appear FIRST in the action handler
+			const actionStart = sourceFile.indexOf(".action(async ()");
+			const envVarInAction = sourceFile.indexOf(
+				"process.env[GAUNTLET_STOP_HOOK_ACTIVE_ENV]",
+				actionStart,
+			);
+			const stdinInAction = sourceFile.indexOf("readStdin", actionStart);
+
+			expect(envVarInAction).toBeLessThan(stdinInAction);
+		});
+
+		it("should pass checkInterval: true to executeRun", async () => {
+			// Read source file to verify stop-hook passes checkInterval: true
+			const { readFileSync } = await import("node:fs");
+			const sourceFile = readFileSync(
+				path.join(originalCwd, "src/commands/stop-hook.ts"),
+				"utf-8",
+			);
+
+			expect(sourceFile).toContain("checkInterval: true");
+		});
+
+		it("should NOT have lock pre-check in stop-hook (delegated to executor)", async () => {
+			// Read source file to verify lock pre-check is removed
+			const { readFileSync } = await import("node:fs");
+			const sourceFile = readFileSync(
+				path.join(originalCwd, "src/commands/stop-hook.ts"),
+				"utf-8",
+			);
+
+			// Should not have getLockFilename import (removed)
+			expect(sourceFile).not.toContain("getLockFilename");
+		});
+
+		it("should NOT have interval checking logic in stop-hook (delegated to executor)", async () => {
+			// Read source file to verify shouldRunBasedOnInterval is removed
+			const { readFileSync } = await import("node:fs");
+			const sourceFile = readFileSync(
+				path.join(originalCwd, "src/commands/stop-hook.ts"),
+				"utf-8",
+			);
+
+			// Should not have shouldRunBasedOnInterval function
+			expect(sourceFile).not.toContain("shouldRunBasedOnInterval");
+		});
+
+		it("should use consoleLogPath from RunResult instead of duplicate findLatestConsoleLog call", async () => {
+			// Read source file to verify we use result.consoleLogPath
+			const { readFileSync } = await import("node:fs");
+			const sourceFile = readFileSync(
+				path.join(originalCwd, "src/commands/stop-hook.ts"),
+				"utf-8",
+			);
+
+			// Should use result.consoleLogPath
+			expect(sourceFile).toContain("result.consoleLogPath");
+		});
+
+		it("should have only six pre-checks before calling executeRun", async () => {
+			// Read source file to count pre-checks
+			const { readFileSync } = await import("node:fs");
+			const sourceFile = readFileSync(
+				path.join(originalCwd, "src/commands/stop-hook.ts"),
+				"utf-8",
+			);
+
+			// Find action handler
+			const actionStart = sourceFile.indexOf(".action(async ()");
+			const executeRunCall = sourceFile.indexOf("executeRun", actionStart);
+			const actionSection = sourceFile.slice(actionStart, executeRunCall);
+
+			// Pre-checks: env var, quick config, marker file, stdin parsing, stop_hook_active, no_config at cwd
+			// Count outputHookResponse calls (early returns)
+			const earlyReturns = (
+				actionSection.match(/outputHookResponse\(/g) || []
+			).length;
+
+			// Should have exactly 6 early returns before executeRun:
+			// 1. env var check (before stdin - fast exit for child processes)
+			// 2. quick config check at process.cwd() (before stdin - avoid timeout for non-gauntlet)
+			// 3. marker file check (before stdin - fast exit for nested stop-hooks)
+			// 4. invalid_input (after stdin parse failure)
+			// 5. stop_hook_active (from stdin input)
+			// 6. no_config at hookInput.cwd (when cwd differs from process.cwd())
+			expect(earlyReturns).toBe(6);
 		});
 	});
 });

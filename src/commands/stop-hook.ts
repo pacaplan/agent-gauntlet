@@ -12,10 +12,9 @@ import {
 import {
 	type GauntletStatus,
 	isBlockingStatus,
+	type RunResult,
 } from "../types/gauntlet-status.js";
 import { DebugLogger, mergeDebugLogConfig } from "../utils/debug-log.js";
-import { readExecutionState } from "../utils/execution-state.js";
-import { getLockFilename } from "./shared.js";
 
 interface StopHookInput {
 	session_id?: string;
@@ -45,14 +44,30 @@ interface MinimalConfig {
 
 /**
  * Timeout for reading stdin (in milliseconds).
- * Claude Code should send the JSON input quickly.
+ * Claude Code sends JSON input immediately on hook invocation.
+ * The 5-second timeout is a safety net for edge cases where stdin is delayed.
  */
 const STDIN_TIMEOUT_MS = 5000;
 
 /**
- * Environment variable set by the gauntlet when spawning child Claude processes.
- * When set, stop-hooks in child processes should allow stops immediately
- * to avoid redundant lock checks and improve clarity in debug logs.
+ * Environment variable to prevent stop-hook recursion in child Claude processes.
+ *
+ * **How it works:**
+ * When the gauntlet runs review gates, it spawns child Claude processes to analyze code.
+ * These child processes inherit environment variables. If a child Claude tries to stop,
+ * its stop hook would normally run the gauntlet again, potentially creating infinite
+ * recursion or redundant checks.
+ *
+ * **Where it's set:**
+ * - In `src/cli-adapters/claude.ts` when spawning Claude for review execution
+ * - Set to "1" in the spawn/exec environment: `{ [GAUNTLET_STOP_HOOK_ACTIVE_ENV]: "1" }`
+ *
+ * **Effect:**
+ * When this env var is set, stop-hooks exit immediately with "approve" decision,
+ * skipping all validation. This is safe because:
+ * 1. The parent gauntlet process is already running validation
+ * 2. Child processes are short-lived review executors, not user sessions
+ * 3. Debug logging is skipped to avoid polluting logs with child process entries
  */
 export const GAUNTLET_STOP_HOOK_ACTIVE_ENV = "GAUNTLET_STOP_HOOK_ACTIVE";
 
@@ -62,39 +77,45 @@ export const GAUNTLET_STOP_HOOK_ACTIVE_ENV = "GAUNTLET_STOP_HOOK_ACTIVE";
 const DEFAULT_LOG_DIR = "gauntlet_logs";
 
 /**
- * Find the latest console.N.log file in the log directory.
- * Returns the absolute path to the file, or null if none found.
+ * Marker file to detect nested stop-hook invocations.
+ *
+ * **Why this exists:**
+ * When the gauntlet spawns child Claude processes for code reviews, those child
+ * processes may trigger stop hooks when they exit. Claude Code does NOT pass
+ * environment variables to hooks, so GAUNTLET_STOP_HOOK_ACTIVE_ENV doesn't work.
+ *
+ * **How it works:**
+ * 1. Stop-hook creates this file (containing PID) before running the gauntlet
+ * 2. If another stop-hook fires during execution, it sees this file and fast-exits
+ * 3. Stop-hook removes this file when complete (success, failure, or error)
+ *
+ * This prevents nested stop-hooks from attempting to run concurrent gauntlets
+ * (which would hit lock_conflict anyway, but this is faster and quieter).
  */
-async function findLatestConsoleLog(logDir: string): Promise<string | null> {
-	try {
-		const files = await fs.readdir(logDir);
-		let maxNum = -1;
-		let latestFile: string | null = null;
-
-		for (const file of files) {
-			if (!file.startsWith("console.") || !file.endsWith(".log")) {
-				continue;
-			}
-			const middle = file.slice("console.".length, file.length - ".log".length);
-			if (/^\d+$/.test(middle)) {
-				const n = parseInt(middle, 10);
-				if (n > maxNum) {
-					maxNum = n;
-					latestFile = file;
-				}
-			}
-		}
-
-		return latestFile ? path.join(logDir, latestFile) : null;
-	} catch {
-		return null;
-	}
-}
+const STOP_HOOK_MARKER_FILE = ".stop-hook-active";
 
 /**
- * Read stdin with a timeout. Reads until newline or timeout.
- * Returns empty string on timeout (allows stop).
- * Claude Code sends newline-terminated JSON, so we detect completion on newline.
+ * Read hook input from stdin with a timeout.
+ *
+ * **Claude Code Hook Protocol:**
+ * Claude Code invokes stop hooks as shell commands and passes context via stdin
+ * as newline-terminated JSON. The input includes:
+ * - `cwd`: The project working directory (where Claude Code is running)
+ * - `stop_hook_active`: True if already inside a stop hook context (see below)
+ * - `session_id`, `transcript_path`: Session context (not currently used)
+ *
+ * **The `stop_hook_active` field (stdin):**
+ * This is set by Claude Code itself when invoking a stop hook while already inside
+ * a stop hook context. This is a second layer of infinite loop prevention (in addition
+ * to the GAUNTLET_STOP_HOOK_ACTIVE env var). If true, we allow stop immediately.
+ *
+ * **Timeout behavior:**
+ * This function reads stdin with a 5-second timeout to handle cases where:
+ * - Claude Code sends input quickly (normal case - resolves on newline)
+ * - No input is sent (timeout returns empty string, allowing stop)
+ * - stdin is already closed (returns immediately)
+ *
+ * The timeout ensures the stop hook doesn't hang indefinitely waiting for input.
  */
 async function readStdin(): Promise<string> {
 	return new Promise((resolve) => {
@@ -298,60 +319,8 @@ function getStopHookLogger() {
 	return getCategoryLogger("stop-hook");
 }
 
-/**
- * Check if log files exist in the log directory (indicating a rerun is needed).
- * Returns true if there are .log or .json files that aren't system files.
- */
-async function hasExistingLogFiles(logDir: string): Promise<boolean> {
-	try {
-		const files = await fs.readdir(logDir);
-		// Check for any .log or .json files (excluding system files like .debug.log)
-		return files.some((file) => {
-			// Skip hidden system files
-			if (file.startsWith(".")) return false;
-			// Check for log or json files
-			return file.endsWith(".log") || file.endsWith(".json");
-		});
-	} catch {
-		// Directory doesn't exist or can't be read - no logs
-		return false;
-	}
-}
-
-/**
- * Check if the run interval has elapsed since the last gauntlet run.
- * Returns true if gauntlet should run, false if interval hasn't elapsed.
- */
-async function shouldRunBasedOnInterval(
-	logDir: string,
-	intervalMinutes: number,
-): Promise<boolean> {
-	const state = await readExecutionState(logDir);
-	if (!state) {
-		// No execution state = always run
-		return true;
-	}
-
-	const lastRun = new Date(state.last_run_completed_at);
-	// Handle invalid date (corrupted state) - treat as needing to run
-	if (Number.isNaN(lastRun.getTime())) {
-		return true;
-	}
-
-	const now = new Date();
-	const elapsedMinutes = (now.getTime() - lastRun.getTime()) / (1000 * 60);
-
-	return elapsedMinutes >= intervalMinutes;
-}
-
 // Export for testing
-export {
-	getStopReasonInstructions,
-	findLatestConsoleLog,
-	hasExistingLogFiles,
-	outputHookResponse,
-	getStatusMessage,
-};
+export { getStopReasonInstructions, outputHookResponse, getStatusMessage };
 export type { GauntletStatus as StopHookStatus, HookResponse };
 
 export function registerStopHookCommand(program: Command): void {
@@ -361,18 +330,83 @@ export function registerStopHookCommand(program: Command): void {
 		.action(async () => {
 			let debugLogger: DebugLogger | null = null;
 			let loggerInitialized = false;
+			let markerFilePath: string | null = null; // Track marker file for cleanup
 			const log = getStopHookLogger();
 
-			try {
-				log.info("Starting gauntlet validation...");
+			// Capture diagnostic info early for later logging
+			const diagnostics = {
+				pid: process.pid,
+				ppid: process.ppid,
+				envVarSet: !!process.env[GAUNTLET_STOP_HOOK_ACTIVE_ENV],
+				processCwd: process.cwd(),
+				rawStdin: "",
+				stdinSessionId: undefined as string | undefined,
+				stdinStopHookActive: undefined as boolean | undefined,
+				stdinCwd: undefined as string | undefined,
+				stdinHookEventName: undefined as string | undefined,
+			};
 
-				// 1. Read stdin JSON
+			try {
+				// ============================================================
+				// FAST EXIT CHECKS (no stdin read, no debug logging)
+				// These checks allow quick exit without the 5-second stdin timeout
+				// ============================================================
+
+				// TODO the env var is not working reliably so we added STOP_HOOK_MARKER_FILE, 
+				// we are going to repurpose env var check to allow user to disable stop hook
+				// at env level.
+
+				// 1. Check env var FIRST - fast exit for child Claude processes
+				// When gauntlet spawns Claude for reviews, child processes have this set
+				if (process.env[GAUNTLET_STOP_HOOK_ACTIVE_ENV]) {
+					outputHookResponse("stop_hook_active");
+					return;
+				}
+
+				// 2. Check if this is a gauntlet project BEFORE reading stdin
+				// This avoids the 5-second stdin timeout for non-gauntlet projects
+				// Use process.cwd() since that's where Claude Code runs the hook
+				const quickConfigCheck = path.join(
+					process.cwd(),
+					".gauntlet",
+					"config.yml",
+				);
+				if (!(await fileExists(quickConfigCheck))) {
+					// Not a gauntlet project - allow stop without reading stdin
+					outputHookResponse("no_config");
+					return;
+				}
+
+				// 3. Check marker file - fast exit for nested stop-hooks
+				// This catches child Claude processes whose stop hooks fire during gauntlet
+				// (Claude Code doesn't pass env vars to hooks, so we use a file-based signal)
+				const markerPath = path.join(
+					process.cwd(),
+					DEFAULT_LOG_DIR,
+					STOP_HOOK_MARKER_FILE,
+				);
+				if (await fileExists(markerPath)) {
+					outputHookResponse("stop_hook_active");
+					return;
+				}
+
+				// ============================================================
+				// STDIN PARSING (only for gauntlet projects)
+				// ============================================================
+
+				// 3. Read stdin JSON - now we know it's a gauntlet project
 				const input = await readStdin();
+				diagnostics.rawStdin = input;
 
 				let hookInput: StopHookInput = {};
 				try {
 					if (input.trim()) {
 						hookInput = JSON.parse(input);
+						// Capture parsed fields for diagnostics
+						diagnostics.stdinSessionId = hookInput.session_id;
+						diagnostics.stdinStopHookActive = hookInput.stop_hook_active;
+						diagnostics.stdinCwd = hookInput.cwd;
+						diagnostics.stdinHookEventName = hookInput.hook_event_name;
 					}
 				} catch {
 					// Invalid JSON - allow stop to avoid blocking on parse errors
@@ -381,36 +415,32 @@ export function registerStopHookCommand(program: Command): void {
 					return;
 				}
 
-				// 2. Check if already in stop hook cycle (infinite loop prevention)
+				// 4. Check stop_hook_active from stdin (Claude Code's loop prevention)
+				// No debug logging here - would pollute logs with hook cycle entries
 				if (hookInput.stop_hook_active) {
-					log.info("Stop hook already active, allowing stop");
 					outputHookResponse("stop_hook_active");
 					return;
 				}
 
-				// 2b. Check if this is a child Claude process spawned by the gauntlet
-				// (indicated by environment variable set in CLI adapters)
-				if (process.env[GAUNTLET_STOP_HOOK_ACTIVE_ENV]) {
-					log.info(
-						"Child Claude process detected (env var set), allowing stop",
-					);
-					outputHookResponse("stop_hook_active");
-					return;
-				}
+				// ============================================================
+				// GAUNTLET EXECUTION (full validation with logging)
+				// ============================================================
 
-				// 3. Determine project directory (use hook-provided cwd if available)
+				log.info("Starting gauntlet validation...");
+
+				// 5. Determine project directory (use hook-provided cwd if different)
+				// Re-check config if cwd differs from process.cwd()
 				const projectCwd = hookInput.cwd ?? process.cwd();
-
-				// 4. Check for gauntlet config
-				const configPath = path.join(projectCwd, ".gauntlet", "config.yml");
-				if (!(await fileExists(configPath))) {
-					// Not a gauntlet project - allow stop
-					log.info("No gauntlet config found, allowing stop");
-					outputHookResponse("no_config");
-					return;
+				if (hookInput.cwd && hookInput.cwd !== process.cwd()) {
+					const configPath = path.join(projectCwd, ".gauntlet", "config.yml");
+					if (!(await fileExists(configPath))) {
+						log.info("No gauntlet config found at hook cwd, allowing stop");
+						outputHookResponse("no_config");
+						return;
+					}
 				}
 
-				// 5. Get log directory from project config
+				// 6. Get log directory from project config (for debug logging)
 				const logDir = path.join(projectCwd, await getLogDir(projectCwd));
 
 				// Initialize app logger in stop-hook mode (file-only, no console output)
@@ -428,56 +458,53 @@ export function registerStopHookCommand(program: Command): void {
 					globalConfig.debug_log,
 				);
 				debugLogger = new DebugLogger(logDir, debugLogConfig);
+
+				// Log diagnostic info to help debug duplicate stop-hook triggers
+				await debugLogger.logStopHookDiagnostics(diagnostics);
+
 				await debugLogger.logCommand("stop-hook", []);
 
-				// 6. Lock pre-check: If lock file exists, another gauntlet is running
-				const lockPath = path.join(logDir, getLockFilename());
-				if (await fileExists(lockPath)) {
-					log.info(
-						"Gauntlet already running (lock file exists), allowing stop",
-					);
-					await debugLogger.logStopHook("allow", "lock_conflict");
-					outputHookResponse("lock_conflict");
-					return;
+				// 7. Create marker file to signal nested stop-hooks to fast-exit
+				markerFilePath = path.join(logDir, STOP_HOOK_MARKER_FILE);
+				try {
+					await fs.writeFile(markerFilePath, `${process.pid}`, "utf-8");
+				} catch {
+					// Ignore - marker is best-effort
+					markerFilePath = null;
 				}
 
-				// 7. Check for existing log files (indicates rerun needed)
-				const hasLogs = await hasExistingLogFiles(logDir);
-
-				// 8. Load global config and check run interval (only if no existing logs)
-				const intervalMinutes = globalConfig.stop_hook.run_interval_minutes;
-				if (!hasLogs) {
-					if (!(await shouldRunBasedOnInterval(logDir, intervalMinutes))) {
-						log.info(
-							`Run interval (${intervalMinutes} min) not elapsed, allowing stop`,
-						);
-						await debugLogger.logStopHook("allow", "interval_not_elapsed");
-						outputHookResponse("interval_not_elapsed", { intervalMinutes });
-						return;
-					}
-				} else {
-					log.info("Existing log files found, rerun required");
-				}
-
-				// 9. Run gauntlet using direct function invocation
+				// 8. Run gauntlet (executor handles lock, interval, config loading)
 				log.info("Running gauntlet gates...");
-				const result = await executeRun({ cwd: projectCwd });
+				let result: RunResult;
+				try {
+					result = await executeRun({
+						cwd: projectCwd,
+						checkInterval: true,
+					});
+				} finally {
+					// Clean up marker file regardless of success/failure
+					if (markerFilePath) {
+						try {
+							await fs.rm(markerFilePath, { force: true });
+						} catch {
+							// Ignore
+						}
+						markerFilePath = null;
+					}
+				}
 
-				// 10. Handle results using unified GauntletStatus directly
+				// 9. Handle results using unified GauntletStatus directly
 				log.info(`Gauntlet completed with status: ${result.status}`);
 				await debugLogger.logStopHook(
 					isBlockingStatus(result.status) ? "block" : "allow",
 					result.status,
 				);
 
-				// Get console log path for failed status
-				const consoleLogPath =
-					result.consoleLogPath ?? (await findLatestConsoleLog(logDir));
-
+				// Use consoleLogPath from result (executor already finds it)
 				outputHookResponse(result.status, {
 					reason:
 						result.status === "failed"
-							? getStopReasonInstructions(consoleLogPath)
+							? getStopReasonInstructions(result.consoleLogPath ?? null)
 							: undefined,
 					errorMessage: result.errorMessage,
 				});
@@ -493,6 +520,15 @@ export function registerStopHookCommand(program: Command): void {
 				log.error(`Stop hook error: ${errorMessage}`);
 				await debugLogger?.logStopHook("allow", `error: ${errorMessage}`);
 				outputHookResponse("error", { errorMessage });
+
+				// Clean up marker file if it was created
+				if (markerFilePath) {
+					try {
+						await fs.rm(markerFilePath, { force: true });
+					} catch {
+						// Ignore
+					}
+				}
 
 				// Clean up logger
 				if (loggerInitialized) {
