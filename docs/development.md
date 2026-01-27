@@ -16,14 +16,14 @@ bun run build
 
 Uses [worktrunk](https://worktrunk.dev) (`wt`) to manage git worktrees for parallel development.
 
-**Branch strategy:**
-- `development` — long-running branch in the main checkout (`~/paul/agent-gauntlet/`). Used for writing specs and coordinating work.
-- Feature branches — created as worktrees off `development`. Used for implementation and testing.
+**Branch strategy (trunk-based):**
+- `main` — trunk branch in the main checkout (`~/paul/agent-gauntlet/`). All PRs merge here.
+- Feature branches — created as worktrees off `main`. Used for implementation and testing.
 
 **Creating a feature worktree:**
 
 ```bash
-wt switch -b development -c feat-name 
+wt switch -b main -c feat-name
 ```
 
 This creates `~/paul/agent-gauntlet.feat-name/`, runs `bun install`, and switches into it.
@@ -31,13 +31,13 @@ This creates `~/paul/agent-gauntlet.feat-name/`, runs `bun install`, and switche
 **Launching an agent in a worktree:**
 
 ```bash
-wt switch -b development -x claude -c feat-name 
+wt switch -b main -x claude -c feat-name
 ```
 
 **Switching between worktrees:**
 
 ```bash
-wt switch development    # back to main checkout
+wt switch main           # back to main checkout
 wt switch feat-name      # back to feature
 wt switch -              # toggle previous
 ```
@@ -48,7 +48,7 @@ wt switch -              # toggle previous
 wt merge
 ```
 
-Commits uncommitted changes, squashes all commits, runs `bun src/index.ts check`, merges to `development`, and removes the worktree.
+Commits uncommitted changes, squashes all commits, runs `bun src/index.ts check`, merges to `main`, and removes the worktree.
 
 **Listing worktrees:**
 
@@ -58,15 +58,14 @@ wt list
 
 ## Release Workflow
 
-### Branching Strategy
-1. Create feature branches for development
-2. Merge feature branches into `development` locally
-3. PR from `development` to `main`
-4. On merge to main, Changesets creates "Version Packages" PR
-5. Merge "Version Packages" PR when ready to release
+### Trunk-Based Development
+1. Create feature branch from `main`
+2. PR from feature branch to `main`
+3. On merge to main, Changesets creates "Version Packages" PR
+4. Merge "Version Packages" PR when ready to release → publishes to npm
 
 ### Creating Changesets
-After merging features to development, before or during PR to main:
+Include a changeset in your feature PR (or add separately before merging):
 
 **Option A: Interactive CLI**
 ```bash
@@ -90,14 +89,6 @@ Description of changes for the changelog
 ### Future Enhancement: Auto-generate Changesets
 
 **Goal:** Streamline workflow with a script/command that generates changesets from PR diff.
-
-**Workflow:**
-1. Merge feature branches into `development`
-2. Create PR from `development` to `main`
-3. Run `/changeset` command or script that:
-   - Analyzes commits/diff in the PR
-   - Generates changeset file with appropriate version bump
-   - Suggests changelog entries based on commit messages
 
 **Implementation ideas:**
 - Claude Code slash command (`/changeset`) that reads PR diff and generates changeset
