@@ -491,20 +491,22 @@ describe("Stop Hook Command", () => {
 	describe("getStatusMessage", () => {
 		it("should return appropriate message for passed status", () => {
 			const message = getStatusMessage("passed");
-			expect(message).toBe("Gauntlet passed — all gates completed successfully.");
+			expect(message).toBe(
+				"✓ Gauntlet passed — all gates completed successfully.",
+			);
 		});
 
 		it("should return appropriate message for no_applicable_gates status", () => {
 			const message = getStatusMessage("no_applicable_gates");
 			expect(message).toBe(
-				"Gauntlet passed — no applicable gates matched current changes.",
+				"✓ Gauntlet passed — no applicable gates matched current changes.",
 			);
 		});
 
 		it("should return appropriate message for passed_with_warnings status", () => {
 			const message = getStatusMessage("passed_with_warnings");
 			expect(message).toBe(
-				"Gauntlet completed — passed with warnings (some issues were skipped).",
+				"✓ Gauntlet completed — passed with warnings (some issues were skipped).",
 			);
 		});
 

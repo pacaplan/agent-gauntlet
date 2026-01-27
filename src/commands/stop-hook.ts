@@ -28,10 +28,10 @@ interface StopHookInput {
 interface HookResponse {
 	decision: "block" | "approve";
 	reason?: string; // This becomes the prompt fed back to Claude (for blocking)
-	stopReason: string; // Always displayed to user - human-friendly status explanation
-	systemMessage?: string; // Additional context for Claude
+	stopReason: string; // Displayed to user when blocking - detailed instructions
+	systemMessage?: string; // Always displayed to user - human-friendly status message
 	status: GauntletStatus; // Machine-readable status code (unified type)
-	message: string; // Human-friendly explanation (internal)
+	message: string; // Human-friendly explanation (same as systemMessage, for internal use)
 }
 
 interface MinimalConfig {
@@ -242,33 +242,33 @@ function getStatusMessage(
 ): string {
 	switch (status) {
 		case "passed":
-			return "Gauntlet passed — all gates completed successfully.";
+			return "✓ Gauntlet passed — all gates completed successfully.";
 		case "passed_with_warnings":
-			return "Gauntlet completed — passed with warnings (some issues were skipped).";
+			return "✓ Gauntlet completed — passed with warnings (some issues were skipped).";
 		case "no_applicable_gates":
-			return "Gauntlet passed — no applicable gates matched current changes.";
+			return "✓ Gauntlet passed — no applicable gates matched current changes.";
 		case "no_changes":
-			return "Gauntlet passed — no changes detected.";
+			return "✓ Gauntlet passed — no changes detected.";
 		case "retry_limit_exceeded":
-			return "Gauntlet terminated — retry limit exceeded. Run `agent-gauntlet clean` to archive and continue.";
+			return "⚠ Gauntlet terminated — retry limit exceeded. Run `agent-gauntlet clean` to archive and continue.";
 		case "interval_not_elapsed":
 			return context?.intervalMinutes
-				? `Gauntlet skipped — run interval (${context.intervalMinutes} min) not elapsed since last run.`
-				: "Gauntlet skipped — run interval not elapsed since last run.";
+				? `⏭ Gauntlet skipped — run interval (${context.intervalMinutes} min) not elapsed since last run.`
+				: "⏭ Gauntlet skipped — run interval not elapsed since last run.";
 		case "lock_conflict":
-			return "Gauntlet skipped — another gauntlet run is already in progress.";
+			return "⏭ Gauntlet skipped — another gauntlet run is already in progress.";
 		case "failed":
-			return "Gauntlet failed — issues must be fixed before stopping.";
+			return "✗ Gauntlet failed — issues must be fixed before stopping.";
 		case "no_config":
-			return "Not a gauntlet project — no .gauntlet/config.yml found.";
+			return "○ Not a gauntlet project — no .gauntlet/config.yml found.";
 		case "stop_hook_active":
-			return "Stop hook cycle detected — allowing stop to prevent infinite loop.";
+			return "↺ Stop hook cycle detected — allowing stop to prevent infinite loop.";
 		case "error":
 			return context?.errorMessage
-				? `Stop hook error — ${context.errorMessage}`
-				: "Stop hook error — unexpected error occurred.";
+				? `⚠ Stop hook error — ${context.errorMessage}`
+				: "⚠ Stop hook error — unexpected error occurred.";
 		case "invalid_input":
-			return "Invalid hook input — could not parse JSON, allowing stop.";
+			return "⚠ Invalid hook input — could not parse JSON, allowing stop.";
 	}
 }
 
@@ -302,6 +302,7 @@ function outputHookResponse(
 	const response: HookResponse = {
 		decision: block ? "block" : "approve",
 		stopReason,
+		systemMessage: message,
 		status,
 		message,
 	};
