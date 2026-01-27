@@ -61,6 +61,27 @@ export const debugLogConfigSchema = z.object({
 	max_size_mb: z.number().default(10),
 });
 
+export const loggingConsoleConfigSchema = z.object({
+	enabled: z.boolean().default(true),
+	format: z.enum(["pretty", "json"]).default("pretty"),
+});
+
+export const loggingFileConfigSchema = z.object({
+	enabled: z.boolean().default(true),
+	format: z.enum(["text", "json"]).default("text"),
+});
+
+export const loggingConfigSchema = z.object({
+	level: z.enum(["debug", "info", "warning", "error"]).default("debug"),
+	console: loggingConsoleConfigSchema.optional(),
+	file: loggingFileConfigSchema.optional(),
+});
+
+export const stopHookConfigSchema = z.object({
+	enabled: z.boolean().optional(),
+	run_interval_minutes: z.number().int().min(0).optional(),
+});
+
 export const gauntletConfigSchema = z.object({
 	base_branch: z.string().min(1).default("origin/main"),
 	log_dir: z.string().min(1).default("gauntlet_logs"),
@@ -72,4 +93,6 @@ export const gauntletConfigSchema = z.object({
 	cli: cliConfigSchema,
 	entry_points: z.array(entryPointSchema).min(1),
 	debug_log: debugLogConfigSchema.optional(),
+	logging: loggingConfigSchema.optional(),
+	stop_hook: stopHookConfigSchema.optional(),
 });

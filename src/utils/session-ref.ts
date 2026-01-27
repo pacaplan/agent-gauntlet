@@ -9,6 +9,9 @@ import { exec } from "node:child_process";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { promisify } from "node:util";
+import { getCategoryLogger } from "../output/app-logger.js";
+
+const log = getCategoryLogger("session-ref");
 
 const SESSION_REF_FILENAME = ".session_ref";
 
@@ -55,9 +58,8 @@ export async function writeSessionRef(logDir: string): Promise<void> {
 		await fs.mkdir(logDir, { recursive: true });
 		await fs.writeFile(path.join(logDir, SESSION_REF_FILENAME), sha);
 	} catch (error) {
-		console.warn(
-			"Failed to create session reference:",
-			error instanceof Error ? error.message : String(error),
+		log.warn(
+			`Failed to create session reference: ${error instanceof Error ? error.message : String(error)}`,
 		);
 	}
 }

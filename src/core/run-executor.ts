@@ -1,6 +1,5 @@
 import fs from "node:fs/promises";
 import path from "node:path";
-import chalk from "chalk";
 import {
 	cleanLogs,
 	hasExistingLogs,
@@ -10,6 +9,13 @@ import {
 } from "../commands/shared.js";
 import { loadGlobalConfig } from "../config/global.js";
 import { loadConfig } from "../config/loader.js";
+import { resolveStopHookConfig } from "../config/stop-hook-config.js";
+import {
+	getCategoryLogger,
+	initLogger,
+	isLoggerConfigured,
+	resetLogger,
+} from "../output/app-logger.js";
 import { ConsoleReporter } from "../output/console.js";
 import {
 	type ConsoleLogHandle,
@@ -47,6 +53,12 @@ export interface ExecuteRunOptions {
 	uncommitted?: boolean;
 	/** Working directory for config loading (defaults to process.cwd()) */
 	cwd?: string;
+	/**
+	 * When true, check if run interval has elapsed before proceeding.
+	 * Only stop-hook uses this; CLI commands (run, check, review) always run immediately.
+	 * If interval hasn't elapsed, returns { status: "interval_not_elapsed", ... }.
+	 */
+	checkInterval?: boolean;
 }
 
 /**
@@ -102,6 +114,32 @@ async function findLatestConsoleLog(logDir: string): Promise<string | null> {
 }
 
 /**
+ * Check if the run interval has elapsed since the last gauntlet run.
+ * Returns true if gauntlet should run, false if interval hasn't elapsed.
+ */
+async function shouldRunBasedOnInterval(
+	logDir: string,
+	intervalMinutes: number,
+): Promise<boolean> {
+	const state = await readExecutionState(logDir);
+	if (!state) {
+		// No execution state = always run
+		return true;
+	}
+
+	const lastRun = new Date(state.last_run_completed_at);
+	// Handle invalid date (corrupted state) - treat as needing to run
+	if (Number.isNaN(lastRun.getTime())) {
+		return true;
+	}
+
+	const now = new Date();
+	const elapsedMinutes = (now.getTime() - lastRun.getTime()) / (1000 * 60);
+
+	return elapsedMinutes >= intervalMinutes;
+}
+
+/**
  * Get status message for a given status.
  */
 function getStatusMessage(status: GauntletStatus): string {
@@ -130,15 +168,16 @@ function getStatusMessage(status: GauntletStatus): string {
 			return "Run interval not elapsed.";
 		case "invalid_input":
 			return "Invalid input.";
+		case "stop_hook_disabled":
+			return "Stop hook is disabled via configuration.";
 	}
 }
 
 /**
- * Helper to log to console. Uses stderr to keep stdout clean for hook JSON responses.
- * Console.N.log files still capture stderr output via process.stderr.write interception.
+ * Get the run executor logger.
  */
-function log(...args: unknown[]): void {
-	console.error(...args);
+function getRunLogger() {
+	return getCategoryLogger("run");
 }
 
 /**
@@ -152,9 +191,20 @@ export async function executeRun(
 	let config: Awaited<ReturnType<typeof loadConfig>> | undefined;
 	let lockAcquired = false;
 	let consoleLogHandle: ConsoleLogHandle | undefined;
+	let loggerInitializedHere = false;
+	const log = getRunLogger();
 
 	try {
 		config = await loadConfig(cwd);
+
+		// Initialize app logger if not already configured (e.g., by stop-hook)
+		if (!isLoggerConfigured()) {
+			await initLogger({
+				mode: "interactive",
+				logDir: config.project.log_dir,
+			});
+			loggerInitializedHere = true;
+		}
 
 		// Initialize debug logger
 		const globalConfig = await loadGlobalConfig();
@@ -171,8 +221,57 @@ export async function executeRun(
 			options.gate ? `-g ${options.gate}` : "",
 			options.commit ? `-c ${options.commit}` : "",
 			options.uncommitted ? "-u" : "",
+			options.checkInterval ? "--check-interval" : "",
 		].filter(Boolean);
 		await debugLogger?.logCommand("run", args);
+
+		// Interval check: only stop-hook passes checkInterval: true
+		// CLI commands (run, check, review) always run immediately
+		if (options.checkInterval) {
+			// Resolve stop hook config from env > project > global
+			const stopHookConfig = resolveStopHookConfig(
+				config.project.stop_hook,
+				globalConfig,
+			);
+
+			// Check if stop hook is disabled
+			if (!stopHookConfig.enabled) {
+				log.debug("Stop hook is disabled via configuration, skipping");
+				// Clean up logger if we initialized it
+				if (loggerInitializedHere) {
+					await resetLogger();
+				}
+				return {
+					status: "stop_hook_disabled",
+					message: getStatusMessage("stop_hook_disabled"),
+				};
+			}
+
+			const logsExist = await hasExistingLogs(config.project.log_dir);
+			// Only check interval if there are no existing logs (not in rerun mode)
+			// and interval > 0 (interval 0 means always run)
+			if (!logsExist && stopHookConfig.run_interval_minutes > 0) {
+				const intervalMinutes = stopHookConfig.run_interval_minutes;
+				const shouldRun = await shouldRunBasedOnInterval(
+					config.project.log_dir,
+					intervalMinutes,
+				);
+				if (!shouldRun) {
+					log.debug(
+						`Run interval (${intervalMinutes} min) not elapsed, skipping`,
+					);
+					// Clean up logger if we initialized it
+					if (loggerInitializedHere) {
+						await resetLogger();
+					}
+					return {
+						status: "interval_not_elapsed",
+						message: `Run interval (${intervalMinutes} min) not elapsed.`,
+						intervalMinutes,
+					};
+				}
+			}
+		}
 
 		// Determine effective base branch first (needed for auto-clean)
 		const effectiveBaseBranch =
@@ -194,7 +293,7 @@ export async function executeRun(
 				effectiveBaseBranch,
 			);
 			if (autoCleanResult.clean) {
-				log(chalk.dim(`Auto-cleaning logs (${autoCleanResult.reason})...`));
+				log.debug(`Auto-cleaning logs (${autoCleanResult.reason})...`);
 				await debugLogger?.logClean(
 					"auto",
 					autoCleanResult.reason || "unknown",
@@ -206,6 +305,10 @@ export async function executeRun(
 		// Try to acquire lock (non-exiting version)
 		lockAcquired = await tryAcquireLock(config.project.log_dir);
 		if (!lockAcquired) {
+			// Clean up logger if we initialized it
+			if (loggerInitializedHere) {
+				await resetLogger();
+			}
 			return {
 				status: "lock_conflict",
 				message: getStatusMessage("lock_conflict"),
@@ -227,9 +330,7 @@ export async function executeRun(
 		let passedSlotsMap: Map<string, Map<number, PassedSlot>> | undefined;
 
 		if (isRerun) {
-			log(
-				chalk.dim("Existing logs detected — running in verification mode..."),
-			);
+			log.debug("Existing logs detected — running in verification mode...");
 			const { failures: previousFailures, passedSlots } =
 				await findPreviousFailures(config.project.log_dir, options.gate, true);
 
@@ -252,10 +353,8 @@ export async function executeRun(
 						gf.adapterFailures.reduce((s, af) => s + af.violations.length, 0),
 					0,
 				);
-				log(
-					chalk.yellow(
-						`Found ${previousFailures.length} gate(s) with ${totalViolations} previous violation(s)`,
-					),
+				log.warn(
+					`Found ${previousFailures.length} gate(s) with ${totalViolations} previous violation(s)`,
 				);
 			}
 
@@ -272,7 +371,7 @@ export async function executeRun(
 					effectiveBaseBranch,
 				);
 				if (resolved.warning) {
-					log(chalk.yellow(`Warning: ${resolved.warning}`));
+					log.warn(`Warning: ${resolved.warning}`);
 				}
 				if (resolved.fixBase) {
 					changeOptions = { fixBase: resolved.fixBase };
@@ -299,14 +398,17 @@ export async function executeRun(
 		const expander = new EntryPointExpander();
 		const jobGen = new JobGenerator(config);
 
-		log(chalk.dim("Detecting changes..."));
+		log.debug("Detecting changes...");
 		const changes = await changeDetector.getChangedFiles();
 
 		if (changes.length === 0) {
-			log(chalk.green("No changes detected."));
+			log.info("No changes detected.");
 			// Do not write execution state - no gates ran
 			await releaseLock(config.project.log_dir);
 			consoleLogHandle?.restore();
+			if (loggerInitializedHere) {
+				await resetLogger();
+			}
 			return {
 				status: "no_changes",
 				message: getStatusMessage("no_changes"),
@@ -314,7 +416,7 @@ export async function executeRun(
 			};
 		}
 
-		log(chalk.dim(`Found ${changes.length} changed files.`));
+		log.debug(`Found ${changes.length} changed files.`);
 
 		const entryPoints = await expander.expand(
 			config.project.entry_points,
@@ -327,10 +429,13 @@ export async function executeRun(
 		}
 
 		if (jobs.length === 0) {
-			log(chalk.yellow("No applicable gates for these changes."));
+			log.warn("No applicable gates for these changes.");
 			// Do not write execution state - no gates ran
 			await releaseLock(config.project.log_dir);
 			consoleLogHandle?.restore();
+			if (loggerInitializedHere) {
+				await resetLogger();
+			}
 			return {
 				status: "no_applicable_gates",
 				message: getStatusMessage("no_applicable_gates"),
@@ -338,7 +443,7 @@ export async function executeRun(
 			};
 		}
 
-		log(chalk.dim(`Running ${jobs.length} gates...`));
+		log.debug(`Running ${jobs.length} gates...`);
 
 		// Compute diff stats and log run start
 		const runMode = isRerun ? "verification" : "full";
@@ -400,6 +505,11 @@ export async function executeRun(
 		await releaseLock(config.project.log_dir);
 		consoleLogHandle?.restore();
 
+		// Clean up logger if we initialized it
+		if (loggerInitializedHere) {
+			await resetLogger();
+		}
+
 		return {
 			status,
 			message: getStatusMessage(status),
@@ -414,6 +524,12 @@ export async function executeRun(
 			await releaseLock(config.project.log_dir);
 		}
 		consoleLogHandle?.restore();
+
+		// Clean up logger if we initialized it
+		if (loggerInitializedHere) {
+			await resetLogger();
+		}
+
 		const err = error as { message?: string };
 		const errorMessage = err.message || "unknown error";
 		return {

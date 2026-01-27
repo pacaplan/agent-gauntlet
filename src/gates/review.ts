@@ -7,6 +7,7 @@ import type {
 	ReviewGateConfig,
 	ReviewPromptFrontmatter,
 } from "../config/types.js";
+import { getCategoryLogger } from "../output/app-logger.js";
 import {
 	type DiffFileRange,
 	isValidViolationLocation,
@@ -17,6 +18,8 @@ import type {
 	PreviousViolation,
 	ReviewFullJsonOutput,
 } from "./result.js";
+
+const log = getCategoryLogger("gate", "review");
 
 const execAsync = promisify(exec);
 
@@ -167,9 +170,7 @@ export class ReviewGateExecutor {
 		};
 
 		try {
-			console.log(
-				`[ReviewGate] Starting review: ${config.name} | entry=${entryPointPath}`,
-			);
+			log.debug(`Starting review: ${config.name} | entry=${entryPointPath}`);
 			await mainLogger(`Starting review: ${config.name}\n`);
 			await mainLogger(`Entry point: ${entryPointPath}\n`);
 			await mainLogger(`Base branch: ${baseBranch}\n`);
@@ -179,11 +180,11 @@ export class ReviewGateExecutor {
 				baseBranch,
 				changeOptions,
 			);
-			console.log(
-				`[ReviewGate] getDiff returned ${diff.length} chars, ${diff.split("\n").length} lines`,
+			log.debug(
+				`getDiff returned ${diff.length} chars, ${diff.split("\n").length} lines`,
 			);
 			if (!diff.trim()) {
-				console.log(`[ReviewGate] Empty diff after trim, returning pass`);
+				log.debug(`Empty diff after trim, returning pass`);
 				await mainLogger("No changes found in entry point, skipping review.\n");
 				await mainLogger("Result: pass - No changes to review\n");
 				return {
@@ -212,8 +213,8 @@ export class ReviewGateExecutor {
 
 			const preferences = config.cli_preference || [];
 			const parallel = config.parallel ?? false;
-			console.log(
-				`[ReviewGate] Checking adapters: ${preferences.join(", ") || "(none configured)"}`,
+			log.debug(
+				`Checking adapters: ${preferences.join(", ") || "(none configured)"}`,
 			);
 
 			// Determine healthy adapters
@@ -228,13 +229,13 @@ export class ReviewGateExecutor {
 				} else {
 					const adapter = getAdapter(toolName);
 					if (!adapter) {
-						console.log(`[ReviewGate] Adapter ${toolName}: not found`);
+						log.debug(`Adapter ${toolName}: not found`);
 						isHealthy = false;
 					} else {
 						const health = await adapter.checkHealth({ checkUsageLimit });
 						isHealthy = health.status === "healthy";
-						console.log(
-							`[ReviewGate] Adapter ${toolName}: ${health.status}${health.message ? ` - ${health.message}` : ""}`,
+						log.debug(
+							`Adapter ${toolName}: ${health.status}${health.message ? ` - ${health.message}` : ""}`,
 						);
 						if (!isHealthy) {
 							await mainLogger(
@@ -251,7 +252,7 @@ export class ReviewGateExecutor {
 
 			if (healthyAdapters.length === 0) {
 				const msg = "Review dispatch failed: no healthy adapters available";
-				console.log(`[ReviewGate] ERROR: ${msg}`);
+				log.error(`ERROR: ${msg}`);
 				await mainLogger(`Result: error - ${msg}\n`);
 				return {
 					jobId,
@@ -261,9 +262,7 @@ export class ReviewGateExecutor {
 					logPaths,
 				};
 			}
-			console.log(
-				`[ReviewGate] Healthy adapters: ${healthyAdapters.join(", ")}`,
-			);
+			log.debug(`Healthy adapters: ${healthyAdapters.join(", ")}`);
 
 			// Round-robin assignment over healthy adapters
 			const assignments: Array<{
@@ -334,14 +333,14 @@ export class ReviewGateExecutor {
 			}
 
 			const dispatchMsg = `Dispatching ${required} review(s) via round-robin: ${assignments.map((a) => `${a.adapter}@${a.reviewIndex}`).join(", ")}`;
-			console.log(`[ReviewGate] ${dispatchMsg}`);
+			log.debug(dispatchMsg);
 			await mainLogger(`${dispatchMsg}\n`);
 
 			// Separate assignments into running and skipped
 			const runningAssignments = assignments.filter((a) => !a.skip);
 			const skippedAssignments = assignments.filter((a) => a.skip);
-			console.log(
-				`[ReviewGate] Running: ${runningAssignments.length}, Skipped: ${skippedAssignments.length}`,
+			log.debug(
+				`Running: ${runningAssignments.length}, Skipped: ${skippedAssignments.length}`,
 			);
 
 			// Track skipped slots for output
@@ -545,7 +544,7 @@ export class ReviewGateExecutor {
 				return aIndex - bIndex;
 			});
 
-			console.log(`[ReviewGate] Complete: ${status} - ${message}`);
+			log.debug(`Complete: ${status} - ${message}`);
 			await mainLogger(`Result: ${status} - ${message}\n`);
 
 			return {
@@ -562,7 +561,7 @@ export class ReviewGateExecutor {
 			const errMsg = err.message || "Unknown error";
 			const errStack = err.stack || "";
 			// nosemgrep: javascript.lang.security.audit.unsafe-formatstring.unsafe-formatstring
-			console.error("[ReviewGate] CRITICAL ERROR:", errMsg, errStack);
+			log.error(`CRITICAL ERROR: ${errMsg} ${errStack}`);
 			await mainLogger(`Critical Error: ${errMsg}\n`);
 			await mainLogger("Result: error\n");
 			return {
@@ -808,7 +807,7 @@ export class ReviewGateExecutor {
 		} catch (error: unknown) {
 			const err = error as { message?: string };
 			const errorMsg = `Error running ${adapter.name}@${reviewIndex}: ${err.message}`;
-			console.error(`[ReviewGate] ${errorMsg}`);
+			log.error(errorMsg);
 			await adapterLogger(`${errorMsg}\n`);
 			await mainLogger(`${errorMsg}\n`);
 			return null;
@@ -821,8 +820,8 @@ export class ReviewGateExecutor {
 		options?: { commit?: string; uncommitted?: boolean; fixBase?: string },
 	): Promise<string> {
 		// Debug: log which diff mode is active
-		console.log(
-			`[DEBUG getDiff] entryPoint=${entryPointPath}, fixBase=${options?.fixBase ?? "none"}, uncommitted=${options?.uncommitted ?? false}, commit=${options?.commit ?? "none"}`,
+		log.debug(
+			`getDiff: entryPoint=${entryPointPath}, fixBase=${options?.fixBase ?? "none"}, uncommitted=${options?.uncommitted ?? false}, commit=${options?.commit ?? "none"}`,
 		);
 
 		// If fixBase is provided (rerun mode)
@@ -877,21 +876,19 @@ export class ReviewGateExecutor {
 				const scopedDiff = [diff, ...newUntrackedDiffs]
 					.filter(Boolean)
 					.join("\n");
-				console.log(
-					`[DEBUG getDiff] Scoped diff via fixBase: ${scopedDiff.split("\n").length} lines`,
+				log.debug(
+					`Scoped diff via fixBase: ${scopedDiff.split("\n").length} lines`,
 				);
 				return scopedDiff;
 			} catch (error) {
-				console.warn(
-					"Warning: Failed to compute diff against fixBase %s, falling back to full uncommitted diff.",
-					options.fixBase,
-					error instanceof Error ? error.message : error,
+				log.warn(
+					`Failed to compute diff against fixBase ${options.fixBase}, falling back to full uncommitted diff. ${error instanceof Error ? error.message : error}`,
 				);
 			}
 		}
 
 		if (options?.uncommitted) {
-			console.log(`[DEBUG getDiff] Using full uncommitted diff (no fixBase)`);
+			log.debug(`Using full uncommitted diff (no fixBase)`);
 			const pathArg = this.pathArg(entryPointPath);
 			const staged = await this.execDiff(`git diff --cached${pathArg}`);
 			const unstaged = await this.execDiff(`git diff${pathArg}`);

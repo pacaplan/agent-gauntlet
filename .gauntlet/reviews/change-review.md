@@ -35,7 +35,7 @@ The task plan lives at `openspec/changes/*/tasks.md`
 *   **Completeness:** Do the tasks map 1:1 to the Spec requirements?
 *   **Actionability:** Are the tasks broken down enough to be safe and clear?
 *   **Validation:** Do the validation steps cover the critical user paths?
-*   **Test Coverage:** Is there at least one unit or integration test task for every `#### Scenario:` in the spec deltas?
+*   **Test Coverage:** Is there a sufficient breadth and clarity of test cases?
 
 ### 4. OpenSpec Standards Compliance
 Reference: `openspec/AGENTS.md`
