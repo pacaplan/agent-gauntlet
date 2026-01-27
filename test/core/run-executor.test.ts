@@ -93,10 +93,6 @@ describe("run-executor checkInterval option", () => {
 				"utf-8",
 			);
 
-			// Find positions of interval check and lock acquisition
-			const intervalCheckPos = sourceFile.indexOf("options.checkInterval");
-			const lockAcquisitionPos = sourceFile.indexOf("tryAcquireLock");
-
 			// Interval check should appear before lock acquisition in the executeRun function
 			const executeRunStart = sourceFile.indexOf(
 				"export async function executeRun",
@@ -110,6 +106,11 @@ describe("run-executor checkInterval option", () => {
 				executeRunStart,
 			);
 
+			// First verify both substrings exist in executeRun
+			expect(intervalCheckInExecute).toBeGreaterThan(-1);
+			expect(lockAcquisitionInExecute).toBeGreaterThan(-1);
+
+			// Then verify ordering
 			expect(intervalCheckInExecute).toBeLessThan(lockAcquisitionInExecute);
 		});
 
@@ -132,6 +133,11 @@ describe("run-executor checkInterval option", () => {
 				executeRunStart,
 			);
 
+			// First verify both substrings exist in executeRun
+			expect(intervalCheckInExecute).toBeGreaterThan(-1);
+			expect(autoCleanInExecute).toBeGreaterThan(-1);
+
+			// Then verify ordering
 			expect(intervalCheckInExecute).toBeLessThan(autoCleanInExecute);
 		});
 

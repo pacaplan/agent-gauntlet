@@ -41,7 +41,7 @@ All execution logic (lock management, interval detection, config loading) should
 
 Move the environment variable check before stdin parsing for faster exit:
 
-```
+```text
 1. Check GAUNTLET_STOP_HOOK_ACTIVE_ENV → allow stop immediately (no stdin read)
 2. Parse stdin JSON
 3. Check stop_hook_active from input → allow stop

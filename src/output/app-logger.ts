@@ -1,3 +1,4 @@
+import fs from "node:fs";
 import fsPromises from "node:fs/promises";
 import path from "node:path";
 import {
@@ -54,7 +55,6 @@ function safeStringify(value: unknown): string {
  * Format matches existing DebugLogger: [ISO_TIMESTAMP] message
  */
 function createDebugLogSink(logDir: string): (record: LogRecord) => void {
-	const fs = require("node:fs");
 	const debugLogPath = path.join(logDir, ".debug.log");
 
 	// Open file for append
@@ -145,7 +145,6 @@ export async function initLogger(config: AppLoggerConfig): Promise<void> {
 export async function resetLogger(): Promise<void> {
 	if (debugLogFd !== null) {
 		try {
-			const fs = require("node:fs");
 			fs.closeSync(debugLogFd);
 		} catch {
 			// Ignore close errors

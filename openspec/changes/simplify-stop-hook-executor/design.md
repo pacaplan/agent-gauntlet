@@ -2,7 +2,7 @@
 
 ## Current Architecture
 
-```
+```text
 ┌─────────────────────────────────────────────────────────────────┐
 │                        stop-hook.ts                              │
 │  1. Parse stdin JSON                                            │
@@ -35,7 +35,7 @@
 
 ## Proposed Architecture
 
-```
+```text
 ┌─────────────────────────────────────────────────────────────────┐
 │                        stop-hook.ts                              │
 │  1. Check env var → allow stop immediately (no stdin read)      │

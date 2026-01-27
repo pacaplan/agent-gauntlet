@@ -352,9 +352,7 @@ export function registerStopHookCommand(program: Command): void {
 				// These checks allow quick exit without the 5-second stdin timeout
 				// ============================================================
 
-				// TODO the env var is not working reliably so we added STOP_HOOK_MARKER_FILE, 
-				// we are going to repurpose env var check to allow user to disable stop hook
-				// at env level.
+				// TODO: The env var is not working reliably so we added STOP_HOOK_MARKER_FILE; repurpose the env var check to allow users to disable the stop hook at env level.
 
 				// 1. Check env var FIRST - fast exit for child Claude processes
 				// When gauntlet spawns Claude for reviews, child processes have this set
