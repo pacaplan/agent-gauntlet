@@ -1,7 +1,12 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 
-const execFileAsync = promisify(execFile);
+const execFileAsyncOriginal = promisify(execFile);
+export let execFileAsync = execFileAsyncOriginal;
+
+export function setExecFileAsync(fn: typeof execFileAsyncOriginal) {
+	execFileAsync = fn;
+}
 
 /**
  * Run a git command safely using execFile (no shell interpolation).
