@@ -39,6 +39,12 @@ export async function computeDiffStats(
 		return computeCommitDiffStats(options.commit);
 	}
 
+	// If fixBase is provided, compute diff from that ref to current working tree
+	// This is used in verification mode to show only NEW changes since the snapshot
+	if (options.fixBase) {
+		return computeFixBaseDiffStats(options.fixBase);
+	}
+
 	if (options.uncommitted) {
 		return computeUncommittedDiffStats();
 	}
@@ -146,6 +152,66 @@ async function computeUncommittedDiffStats(): Promise<DiffStats> {
 		linesAdded: stagedLines.linesAdded + unstagedLines.linesAdded,
 		linesRemoved: stagedLines.linesRemoved + unstagedLines.linesRemoved,
 	};
+}
+
+/**
+ * Compute diff stats from a fixBase ref (stash or commit) to current working tree.
+ * Used in verification mode to show only NEW changes since the snapshot.
+ * This includes staged changes, unstaged changes, and new untracked files.
+ */
+async function computeFixBaseDiffStats(fixBase: string): Promise<DiffStats> {
+	try {
+		// Get line stats for tracked file changes since fixBase
+		// We need to diff against working tree (staged + unstaged changes)
+		const numstat = await gitExec(["diff", "--numstat", fixBase]);
+		const lineStats = parseNumstat(numstat);
+
+		// Get file categorization for tracked file changes
+		const nameStatus = await gitExec(["diff", "--name-status", fixBase]);
+		const fileStats = parseNameStatus(nameStatus);
+
+		// Handle untracked files: only count NEW untracked files that weren't in fixBase
+		// Current untracked files
+		const currentUntracked = (
+			await gitExec(["ls-files", "--others", "--exclude-standard"])
+		)
+			.split("\n")
+			.filter((f) => f.trim().length > 0);
+
+		// Files that existed in fixBase
+		let fixBaseFiles: Set<string>;
+		try {
+			const treeFiles = await gitExec([
+				"ls-tree",
+				"-r",
+				"--name-only",
+				fixBase,
+			]);
+			fixBaseFiles = new Set(
+				treeFiles.split("\n").filter((f) => f.trim().length > 0),
+			);
+		} catch {
+			// If fixBase is invalid or has no tree, assume empty
+			fixBaseFiles = new Set();
+		}
+
+		// New untracked files = current untracked - files that existed in fixBase
+		const newUntrackedFiles = currentUntracked.filter(
+			(f) => !fixBaseFiles.has(f),
+		);
+
+		return {
+			baseRef: fixBase,
+			total: fileStats.total + newUntrackedFiles.length,
+			newFiles: fileStats.newFiles + newUntrackedFiles.length,
+			modifiedFiles: fileStats.modifiedFiles,
+			deletedFiles: fileStats.deletedFiles,
+			linesAdded: lineStats.linesAdded,
+			linesRemoved: lineStats.linesRemoved,
+		};
+	} catch {
+		return emptyDiffStats(fixBase);
+	}
 }
 
 /**

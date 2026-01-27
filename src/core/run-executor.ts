@@ -134,10 +134,11 @@ function getStatusMessage(status: GauntletStatus): string {
 }
 
 /**
- * Helper to log to console. Centralizes logging for easy modification.
+ * Helper to log to console. Uses stderr to keep stdout clean for hook JSON responses.
+ * Console.N.log files still capture stderr output via process.stderr.write interception.
  */
 function log(...args: unknown[]): void {
-	console.log(...args);
+	console.error(...args);
 }
 
 /**
@@ -364,12 +365,12 @@ export async function executeRun(
 
 		const outcome = await runner.run(jobs);
 
-		// Log run end
+		// Log run end with actual statistics from runner
 		await debugLogger?.logRunEnd(
 			outcome.allPassed ? "pass" : "fail",
-			0,
-			0,
-			0,
+			outcome.stats.fixed,
+			outcome.stats.skipped,
+			outcome.stats.failed,
 			logger.getRunNumber(),
 		);
 

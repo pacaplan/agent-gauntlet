@@ -94,7 +94,7 @@ export async function createWorkingTreeRef(): Promise<string> {
 				try {
 					const headSha = await getCurrentCommit();
 					resolve(headSha);
-				} catch (err) {
+				} catch {
 					reject(new Error(`git stash create failed with code ${code}`));
 				}
 			}

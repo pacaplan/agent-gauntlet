@@ -28,6 +28,7 @@ export interface GateResult {
 	logPaths?: string[]; // paths to multiple logs (e.g. per-agent logs)
 	fixInstructions?: string; // Markdown content for fixing failures
 	errorCount?: number; // Number of active failures/violations
+	fixedCount?: number; // Number of violations marked as fixed
 	skipped?: Array<{
 		file: string;
 		line: number | string;
@@ -40,6 +41,7 @@ export interface GateResult {
 		message: string;
 		logPath?: string;
 		errorCount?: number;
+		fixedCount?: number;
 		skipped?: Array<{
 			file: string;
 			line: number | string;

@@ -23,6 +23,18 @@ import type { Job } from "./job.js";
 const execAsync = promisify(exec);
 
 /**
+ * Iteration statistics for RUN_END logging.
+ */
+export interface IterationStats {
+	/** Number of violations marked as fixed */
+	fixed: number;
+	/** Number of violations marked as skipped */
+	skipped: number;
+	/** Number of remaining active violations (failures) */
+	failed: number;
+}
+
+/**
  * Structured result from Runner.run() for proper status mapping.
  */
 export interface RunnerOutcome {
@@ -34,6 +46,49 @@ export interface RunnerOutcome {
 	retryLimitExceeded: boolean;
 	/** Whether any gates had errors */
 	anyErrors: boolean;
+	/** Iteration statistics for debug logging */
+	stats: IterationStats;
+}
+
+/**
+ * Calculate iteration statistics from gate results.
+ * Aggregates fixed, skipped, and failed counts from all results and subResults.
+ * For CHECK gates that don't set errorCount, count failed/error status as 1 failure.
+ */
+function calculateStats(results: GateResult[]): IterationStats {
+	let fixed = 0;
+	let skipped = 0;
+	let failed = 0;
+
+	for (const result of results) {
+		// Count from top-level result
+		if (result.fixedCount) fixed += result.fixedCount;
+		if (result.skipped) skipped += result.skipped.length;
+
+		// For failed gates, use errorCount if set, otherwise count as 1 failure
+		// This handles CHECK gates which only set status but not errorCount
+		if (result.errorCount) {
+			failed += result.errorCount;
+		} else if (result.status === "fail" || result.status === "error") {
+			failed += 1;
+		}
+
+		// Count from subResults (review gates)
+		if (result.subResults) {
+			for (const sub of result.subResults) {
+				if (sub.fixedCount) fixed += sub.fixedCount;
+				if (sub.skipped) skipped += sub.skipped.length;
+
+				if (sub.errorCount) {
+					failed += sub.errorCount;
+				} else if (sub.status === "fail" || sub.status === "error") {
+					failed += 1;
+				}
+			}
+		}
+	}
+
+	return { fixed, skipped, failed };
 }
 
 export class Runner {
@@ -75,6 +130,7 @@ export class Runner {
 				anySkipped: false,
 				retryLimitExceeded: true,
 				anyErrors: false,
+				stats: { fixed: 0, skipped: 0, failed: 0 },
 			};
 		}
 
@@ -110,6 +166,9 @@ export class Runner {
 		const retryLimitExceeded =
 			!allPassed && currentRunNumber === maxAllowedRuns;
 
+		// Calculate statistics from results
+		const stats = calculateStats(this.results);
+
 		// If on the final allowed run and gates failed, report "Retry limit exceeded"
 		if (retryLimitExceeded) {
 			await this.reporter.printSummary(
@@ -122,6 +181,7 @@ export class Runner {
 				anySkipped,
 				retryLimitExceeded: true,
 				anyErrors,
+				stats,
 			};
 		}
 
@@ -132,6 +192,7 @@ export class Runner {
 			anySkipped,
 			retryLimitExceeded: false,
 			anyErrors,
+			stats,
 		};
 	}
 

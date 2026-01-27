@@ -274,8 +274,10 @@ export class ReviewGateExecutor {
 				passIteration?: number;
 			}> = [];
 			for (let i = 0; i < required; i++) {
+				const adapter = healthyAdapters[i % healthyAdapters.length];
+				if (!adapter) continue;
 				assignments.push({
-					adapter: healthyAdapters[i % healthyAdapters.length]!,
+					adapter,
 					reviewIndex: i + 1,
 				});
 			}
@@ -386,7 +388,7 @@ export class ReviewGateExecutor {
 					reviewIndex: assignment.reviewIndex,
 					status: "skipped_prior_pass",
 					message: `Skipped: previously passed in iteration ${assignment.passIteration}`,
-					passIteration: assignment.passIteration!,
+					passIteration: assignment.passIteration ?? 0,
 				});
 			}
 
@@ -500,12 +502,18 @@ export class ReviewGateExecutor {
 							? 1
 							: 0;
 
+				const fixedCount =
+					out.json && Array.isArray(out.json.violations)
+						? out.json.violations.filter((v) => v.status === "fixed").length
+						: 0;
+
 				return {
 					nameSuffix: `(${out.adapter}@${out.reviewIndex})`,
 					status: out.status,
 					message: out.message,
 					logPath,
 					errorCount,
+					fixedCount,
 					skipped: out.skipped,
 				};
 			});
@@ -1078,9 +1086,9 @@ The following violations were NOT marked as fixed or skipped and are still activ
 
 		try {
 			const jsonBlockMatch = output.match(/```json\s*([\s\S]*?)\s*```/);
-			if (jsonBlockMatch) {
+			if (jsonBlockMatch?.[1]) {
 				try {
-					const json = JSON.parse(jsonBlockMatch[1]!);
+					const json = JSON.parse(jsonBlockMatch[1]);
 					return this.validateAndReturn(json, diffRanges);
 				} catch {
 					// Fall through

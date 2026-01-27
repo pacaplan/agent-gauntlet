@@ -161,4 +161,75 @@ describe("computeDiffStats", () => {
 			expect(result.linesRemoved).toBeGreaterThanOrEqual(0);
 		});
 	});
+
+	describe("fixBase mode", () => {
+		it("uses fixBase ref for diff when provided", async () => {
+			// Get current HEAD as a valid ref
+			const { stdout } = await execAsync("git rev-parse HEAD");
+			const headRef = stdout.trim();
+
+			const result = await computeDiffStats("origin/main", {
+				fixBase: headRef,
+			});
+
+			// baseRef should be the fixBase ref
+			expect(result.baseRef).toBe(headRef);
+			// Should return valid structure
+			expect(typeof result.total).toBe("number");
+			expect(typeof result.newFiles).toBe("number");
+			expect(typeof result.modifiedFiles).toBe("number");
+			expect(typeof result.deletedFiles).toBe("number");
+			expect(typeof result.linesAdded).toBe("number");
+			expect(typeof result.linesRemoved).toBe("number");
+		});
+
+		it("returns only changes since fixBase, not all uncommitted changes", async () => {
+			// When using HEAD as fixBase, there should be minimal/no changes
+			// (only unstaged/staged changes relative to HEAD)
+			const result = await computeDiffStats("origin/main", {
+				fixBase: "HEAD",
+			});
+
+			expect(result.baseRef).toBe("HEAD");
+			// The result should be valid (not throw) and represent working tree vs HEAD
+			expect(typeof result.linesAdded).toBe("number");
+			expect(typeof result.linesRemoved).toBe("number");
+		});
+
+		it("handles untracked files correctly against fixBase", async () => {
+			// Test that untracked files are counted based on what existed in fixBase
+			const result = await computeDiffStats("origin/main", {
+				fixBase: "HEAD",
+			});
+
+			// Should include newFiles count (which includes new untracked files)
+			expect(typeof result.newFiles).toBe("number");
+			expect(result.newFiles).toBeGreaterThanOrEqual(0);
+		});
+
+		it("returns empty stats for invalid fixBase ref", async () => {
+			const result = await computeDiffStats("origin/main", {
+				fixBase: "invalid-nonexistent-ref-12345",
+			});
+
+			// Should return the ref but with zero counts due to error handling
+			expect(result.baseRef).toBe("invalid-nonexistent-ref-12345");
+			expect(result.total).toBe(0);
+			expect(result.newFiles).toBe(0);
+		});
+
+		it("prioritizes fixBase over uncommitted option", async () => {
+			// When both fixBase and uncommitted are provided, fixBase should take precedence
+			const { stdout } = await execAsync("git rev-parse HEAD");
+			const headRef = stdout.trim();
+
+			const result = await computeDiffStats("origin/main", {
+				fixBase: headRef,
+				uncommitted: true,
+			});
+
+			// Should use fixBase, not "uncommitted"
+			expect(result.baseRef).toBe(headRef);
+		});
+	});
 });

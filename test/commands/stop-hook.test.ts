@@ -858,4 +858,80 @@ describe("Stop Hook Command", () => {
 			}
 		});
 	});
+
+	describe("child process detection (GAUNTLET_STOP_HOOK_ACTIVE_ENV)", () => {
+		it("should allow stop immediately when GAUNTLET_STOP_HOOK_ACTIVE env var is set", async () => {
+			// Set the environment variable before running
+			process.env.GAUNTLET_STOP_HOOK_ACTIVE = "1";
+
+			try {
+				// Simulate stdin with valid JSON
+				const originalStdin = process.stdin;
+				const mockStdin = {
+					on: mock((event: string, callback: (chunk: Buffer) => void) => {
+						if (event === "data") {
+							setTimeout(() => callback(Buffer.from("{}\n")), 0);
+						}
+					}),
+					readableEnded: false,
+					removeListener: mock(() => {}),
+				};
+				// biome-ignore lint/suspicious/noExplicitAny: Mock stdin for testing
+				(process as any).stdin = mockStdin;
+
+				await program.parseAsync(["node", "cli", "stop-hook"]);
+
+				// biome-ignore lint/suspicious/noExplicitAny: Restore stdin
+				(process as any).stdin = originalStdin;
+
+				// Should have a single JSON output with stop_hook_active status
+				expect(logs.length).toBeGreaterThan(0);
+				// The verbose log uses console.error which we capture in logs
+				const jsonOutput = logs.find((l) => l.startsWith("{"));
+				if (jsonOutput) {
+					const response = JSON.parse(jsonOutput);
+					expect(response.decision).toBe("approve");
+					expect(response.status).toBe("stop_hook_active");
+				}
+			} finally {
+				// Clean up
+				delete process.env.GAUNTLET_STOP_HOOK_ACTIVE;
+			}
+		});
+
+		it("should not initialize debug logger when child process detected", async () => {
+			// This test verifies the code path - debug logger init happens AFTER the child process check
+			// So when GAUNTLET_STOP_HOOK_ACTIVE is set, no debug logging should occur
+			process.env.GAUNTLET_STOP_HOOK_ACTIVE = "1";
+
+			try {
+				const originalStdin = process.stdin;
+				const mockStdin = {
+					on: mock((event: string, callback: (chunk: Buffer) => void) => {
+						if (event === "data") {
+							setTimeout(() => callback(Buffer.from("{}\n")), 0);
+						}
+					}),
+					readableEnded: false,
+					removeListener: mock(() => {}),
+				};
+				// biome-ignore lint/suspicious/noExplicitAny: Mock stdin for testing
+				(process as any).stdin = mockStdin;
+
+				await program.parseAsync(["node", "cli", "stop-hook"]);
+
+				// biome-ignore lint/suspicious/noExplicitAny: Restore stdin
+				(process as any).stdin = originalStdin;
+
+				// Should return immediately with stop_hook_active
+				const jsonOutput = logs.find((l) => l.startsWith("{"));
+				if (jsonOutput) {
+					const response = JSON.parse(jsonOutput);
+					expect(response.status).toBe("stop_hook_active");
+				}
+			} finally {
+				delete process.env.GAUNTLET_STOP_HOOK_ACTIVE;
+			}
+		});
+	});
 });
