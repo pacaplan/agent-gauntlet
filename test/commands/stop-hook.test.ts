@@ -17,11 +17,14 @@ const TEST_DIR = path.join(process.cwd(), `test-stop-hook-${Date.now()}`);
 // Store mocks
 let spawnMock: ReturnType<typeof mock>;
 
-// Mock child_process.spawn and exec
+// Mock child_process.spawn, exec, and execFile
 mock.module("node:child_process", () => {
 	return {
 		spawn: (...args: unknown[]) => spawnMock?.(...args),
 		exec: mock(() => {}),
+		execFile: mock((cmd: string, args: string[], callback: (error: Error | null, stdout: string, stderr: string) => void) => {
+			callback(null, "", "");
+		}),
 	};
 });
 
@@ -784,6 +787,75 @@ describe("Stop Hook Command", () => {
 		it("should output single-line JSON for all responses", () => {
 			outputHookResponse("passed");
 			expect(logs[0].includes("\n")).toBe(false);
+		});
+	});
+
+	describe("stopReason field (always displayed to user)", () => {
+		it("should include stopReason in response for blocking status with detailed instructions", () => {
+			const instructions = "**GAUNTLET FAILED** - Fix the issues";
+			outputHookResponse("failed", { reason: instructions });
+			expect(logs.length).toBe(1);
+			const response = JSON.parse(logs[0]);
+			expect(response.stopReason).toBe(instructions);
+			expect(response.reason).toBe(instructions);
+		});
+
+		it("should include stopReason with human-friendly message for passed status", () => {
+			outputHookResponse("passed");
+			expect(logs.length).toBe(1);
+			const response = JSON.parse(logs[0]);
+			expect(response.stopReason).toBeDefined();
+			expect(response.stopReason).toContain("Gauntlet passed");
+		});
+
+		it("should include stopReason for interval_not_elapsed indicating interval not elapsed", () => {
+			outputHookResponse("interval_not_elapsed", { intervalMinutes: 10 });
+			expect(logs.length).toBe(1);
+			const response = JSON.parse(logs[0]);
+			expect(response.stopReason).toBeDefined();
+			expect(response.stopReason).toContain("10 min");
+			expect(response.stopReason).toContain("not elapsed");
+		});
+
+		it("should include stopReason for no_config indicating not a gauntlet project", () => {
+			outputHookResponse("no_config");
+			expect(logs.length).toBe(1);
+			const response = JSON.parse(logs[0]);
+			expect(response.stopReason).toBeDefined();
+			expect(response.stopReason).toContain("Not a gauntlet project");
+		});
+
+		it("should include stopReason for lock_conflict indicating another run in progress", () => {
+			outputHookResponse("lock_conflict");
+			expect(logs.length).toBe(1);
+			const response = JSON.parse(logs[0]);
+			expect(response.stopReason).toBeDefined();
+			expect(response.stopReason).toContain("already in progress");
+		});
+
+		it("should include stopReason for all non-blocking statuses", () => {
+			const nonBlockingStatuses: StopHookStatus[] = [
+				"passed",
+				"passed_with_warnings",
+				"no_applicable_gates",
+				"no_changes",
+				"retry_limit_exceeded",
+				"interval_not_elapsed",
+				"lock_conflict",
+				"no_config",
+				"stop_hook_active",
+				"error",
+				"invalid_input",
+			];
+
+			for (const status of nonBlockingStatuses) {
+				logs = []; // Clear logs for each test
+				outputHookResponse(status);
+				const response = JSON.parse(logs[0]);
+				expect(response.stopReason).toBeDefined();
+				expect(typeof response.stopReason).toBe("string");
+				expect(response.stopReason.length).toBeGreaterThan(0);
+			}
 		});
 	});
 });

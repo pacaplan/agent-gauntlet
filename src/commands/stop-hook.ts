@@ -23,10 +23,11 @@ interface StopHookInput {
 
 interface HookResponse {
 	decision: "block" | "approve";
-	reason?: string; // This becomes the prompt fed back to Claude
+	reason?: string; // This becomes the prompt fed back to Claude (for blocking)
+	stopReason: string; // Always displayed to user - human-friendly status explanation
 	systemMessage?: string; // Additional context for Claude
 	status: GauntletStatus; // Machine-readable status code (unified type)
-	message: string; // Human-friendly explanation
+	message: string; // Human-friendly explanation (internal)
 }
 
 interface MinimalConfig {
@@ -250,6 +251,7 @@ function getStatusMessage(
  * Uses the Claude Code hook protocol format:
  * - decision: "block" | "approve" - whether to block or allow the stop
  * - reason: string - when blocking, this becomes the prompt fed back to Claude automatically
+ * - stopReason: string - always displayed to user regardless of decision
  * - status: machine-readable status code for transparency (unified GauntletStatus)
  * - message: human-friendly explanation of the outcome
  */
@@ -267,8 +269,13 @@ function outputHookResponse(
 		errorMessage: options?.errorMessage,
 	});
 
+	// For blocking status with detailed instructions, use those as stopReason
+	// For non-blocking statuses, use the human-friendly message as stopReason
+	const stopReason = block && options?.reason ? options.reason : message;
+
 	const response: HookResponse = {
 		decision: block ? "block" : "approve",
+		stopReason,
 		status,
 		message,
 	};

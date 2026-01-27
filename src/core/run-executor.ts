@@ -303,7 +303,7 @@ export async function executeRun(
 
 		if (changes.length === 0) {
 			log(chalk.green("No changes detected."));
-			await writeExecutionState(config.project.log_dir);
+			// Do not write execution state - no gates ran
 			await releaseLock(config.project.log_dir);
 			consoleLogHandle?.restore();
 			return {
@@ -327,7 +327,7 @@ export async function executeRun(
 
 		if (jobs.length === 0) {
 			log(chalk.yellow("No applicable gates for these changes."));
-			await writeExecutionState(config.project.log_dir);
+			// Do not write execution state - no gates ran
 			await releaseLock(config.project.log_dir);
 			consoleLogHandle?.restore();
 			return {
@@ -407,13 +407,9 @@ export async function executeRun(
 			consoleLogPath: consoleLogPath ?? undefined,
 		};
 	} catch (error: unknown) {
-		// Write execution state even on error (if lock was acquired)
+		// Do not write execution state on error - no gates completed successfully
+		// Only release lock if it was acquired
 		if (config && lockAcquired) {
-			try {
-				await writeExecutionState(config.project.log_dir);
-			} catch {
-				// Ignore errors writing state during error handling
-			}
 			await releaseLock(config.project.log_dir);
 		}
 		consoleLogHandle?.restore();
