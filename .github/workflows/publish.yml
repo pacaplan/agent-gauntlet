@@ -1,22 +1,21 @@
-name: Publish to npm
+name: Release
 
 on:
   push:
     branches:
       - main
 
+concurrency: ${{ github.workflow }}-${{ github.ref }}
+
 permissions:
   contents: write
-  pull-requests: read
+  pull-requests: write
 
 jobs:
-  publish:
+  release:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-          token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
@@ -30,41 +29,14 @@ jobs:
       - name: Install dependencies
         run: bun install
 
-      - name: Get version bump type from PR labels
-        id: version
-        uses: actions/github-script@v7
+      - name: Create Release Pull Request or Publish
+        id: changesets
+        uses: changesets/action@v1
         with:
-          script: |
-            // Find the PR that was merged
-            const { data: prs } = await github.rest.pulls.list({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              state: 'closed',
-              sort: 'updated',
-              direction: 'desc',
-              per_page: 1
-            });
-
-            const pr = prs.find(p => p.merge_commit_sha === context.sha);
-            if (!pr) {
-              console.log('No merged PR found, defaulting to patch');
-              return 'patch';
-            }
-
-            const labels = pr.labels.map(l => l.name);
-            if (labels.includes('release:major')) return 'major';
-            if (labels.includes('release:minor')) return 'minor';
-            return 'patch';
-          result-encoding: string
-
-      - name: Bump version
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          npm version ${{ steps.version.outputs.result }} -m "chore: bump version to %s [skip ci]"
-          git push --follow-tags
-
-      - name: Publish to npm
-        run: npm publish
+          publish: bun run release
+          version: bun run version
+          title: 'chore: version packages'
+          commit: 'chore: version packages'
         env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

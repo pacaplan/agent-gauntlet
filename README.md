@@ -1,5 +1,9 @@
 # Agent Gauntlet
 
+[![CI](https://github.com/pacaplan/agent-gauntlet/actions/workflows/gauntlet.yml/badge.svg)](https://github.com/pacaplan/agent-gauntlet/actions/workflows/gauntlet.yml)
+[![npm](https://img.shields.io/npm/v/agent-gauntlet)](https://www.npmjs.com/package/agent-gauntlet)
+[![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
+
 > Don't just review the agent's code — put it through the gauntlet.
 
 Agent Gauntlet is a configurable “feedback loop” runner for AI-assisted development workflows.
