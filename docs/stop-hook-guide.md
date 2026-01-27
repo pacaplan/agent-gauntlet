@@ -53,20 +53,54 @@ Add the stop hook to your Claude Code settings:
 
 The empty `matcher` means the hook runs for all projects. Use a path pattern like `"/path/to/project/*"` to limit to specific projects.
 
-## Global Configuration
+## Configuration
+
+Stop hook behavior can be configured at three levels with clear precedence:
+1. **Environment variables** (highest priority)
+2. **Project config** (`.gauntlet/config.yml`)
+3. **Global config** (`~/.config/agent-gauntlet/config.yml`) (lowest priority)
+
+### Global Configuration
 
 User-level settings are stored in `~/.config/agent-gauntlet/config.yml`:
 
 ```yaml
 stop_hook:
-  run_interval_minutes: 10  # Minimum time between gauntlet runs
+  enabled: true               # Whether stop hook is active (default: true)
+  run_interval_minutes: 10    # Minimum time between gauntlet runs
+```
+
+### Project Configuration
+
+Override global settings per-project in `.gauntlet/config.yml`:
+
+```yaml
+stop_hook:
+  enabled: true               # Override global enabled setting
+  run_interval_minutes: 5     # Override global interval
+```
+
+### Environment Variable Overrides
+
+Override all config levels using environment variables:
+
+| Variable | Values | Description |
+|----------|--------|-------------|
+| `GAUNTLET_STOP_HOOK_ENABLED` | `true`, `1`, `false`, `0` | Override whether stop hook is enabled |
+| `GAUNTLET_STOP_HOOK_INTERVAL_MINUTES` | Non-negative integer | Override run interval (0 = always run) |
+
+Example:
+```bash
+# Disable stop hook for this session
+GAUNTLET_STOP_HOOK_ENABLED=false claude
 ```
 
 ### Configuration Options
 
 | Setting | Default | Description |
 |---------|---------|-------------|
-| `stop_hook.run_interval_minutes` | 10 | Minimum minutes between gauntlet runs. Prevents excessive re-runs during active development. |
+| `stop_hook.enabled` | `true` | Whether stop hook validation runs. Set to `false` to disable entirely. |
+| `stop_hook.run_interval_minutes` | `10` | Minimum minutes between gauntlet runs. Set to `0` to always run. Prevents excessive re-runs during active development. |
 
 ## How It Works
 
@@ -74,13 +108,15 @@ stop_hook:
 
 1. **No gauntlet project**: If no `.gauntlet/config.yml` exists, the hook allows the stop immediately.
 
-2. **Already running**: If another gauntlet is in progress (lock file exists), the hook allows the stop to prevent deadlocks.
+2. **Stop hook disabled**: If `enabled: false` is set via environment variable, project config, or global config, the hook allows the stop immediately.
 
-3. **Interval not elapsed**: If less than `run_interval_minutes` since the last run, the hook allows the stop without re-running gates.
+3. **Already running**: If another gauntlet is in progress (lock file exists), the hook allows the stop to prevent deadlocks.
 
-4. **Gates pass**: If `agent-gauntlet run` succeeds, the hook allows the stop.
+4. **Interval not elapsed**: If less than `run_interval_minutes` since the last run (and interval > 0), the hook allows the stop without re-running gates.
 
-5. **Gates fail**: The hook blocks the stop and returns instructions to the agent for fixing issues.
+5. **Gates pass**: If `agent-gauntlet run` succeeds, the hook allows the stop.
+
+6. **Gates fail**: The hook blocks the stop and returns instructions to the agent for fixing issues.
 
 ### Termination Conditions
 
@@ -173,6 +209,7 @@ Example entries:
 | `stop_hook_active` | allow | Recursive hook prevention triggered |
 | `interval_not_elapsed` | allow | Run interval not yet passed |
 | `invalid_input` | allow | Invalid input to stop-hook |
+| `stop_hook_disabled` | allow | Stop hook disabled via configuration |
 
 ### RUN_START with Diff Statistics
 

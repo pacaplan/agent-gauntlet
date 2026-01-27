@@ -16,7 +16,8 @@ export type GauntletStatus =
 	| "no_config" // No .gauntlet/config.yml found
 	| "stop_hook_active" // Infinite loop prevention
 	| "interval_not_elapsed" // Run interval hasn't passed
-	| "invalid_input"; // Failed to parse hook JSON input
+	| "invalid_input" // Failed to parse hook JSON input
+	| "stop_hook_disabled"; // Stop hook disabled via configuration
 
 export interface RunResult {
 	status: GauntletStatus;

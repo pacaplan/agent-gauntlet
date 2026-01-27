@@ -38,6 +38,12 @@ This document lists the configuration files Agent Gauntlet loads and all support
     Whether to enable debug logging.
   - **max_size_mb**: number (default: `10`)
     Maximum size of the debug log file in megabytes. When exceeded, the current log is rotated to `.debug.log.1` and a new log is started.
+- **stop_hook**: object (optional)
+  Configuration for the stop hook behavior. These settings can be overridden by environment variables (see [Environment Variable Overrides](#environment-variable-overrides)).
+  - **enabled**: boolean (optional; default from global config, typically `true`)
+    Whether the stop hook gauntlet is enabled for this project. Set to `false` to disable stop hook validation entirely.
+  - **run_interval_minutes**: number (optional; default from global config, typically `10`)
+    Minimum minutes between gauntlet runs. Set to `0` to always run the gauntlet on every stop attempt.
 - **entry_points**: array (required)  
   Declares which parts of the repo are “scopes” for change detection and which gates run for each scope. Only entry points with detected changes will produce jobs.
   - **path**: string (required)  
@@ -79,6 +85,35 @@ entry_points:
   - path: packages/*
     checks:
       - lint
+```
+
+## Environment Variable Overrides
+
+Stop hook configuration can be overridden using environment variables. This is useful for CI/CD pipelines or temporary disabling of the stop hook.
+
+**Precedence order** (highest to lowest):
+1. Environment variables
+2. Project config (`.gauntlet/config.yml`)
+3. Global config (`~/.config/agent-gauntlet/config.yml`)
+
+| Variable | Values | Description |
+|----------|--------|-------------|
+| `GAUNTLET_STOP_HOOK_ENABLED` | `true`, `1`, `false`, `0` | Override whether stop hook is enabled |
+| `GAUNTLET_STOP_HOOK_INTERVAL_MINUTES` | Non-negative integer | Override run interval (0 = always run) |
+
+Each field is resolved independently, so you can set one via environment variable while using config files for the other.
+
+### Examples
+
+```bash
+# Disable stop hook for this session
+GAUNTLET_STOP_HOOK_ENABLED=false claude
+
+# Always run gauntlet on every stop (no interval throttling)
+GAUNTLET_STOP_HOOK_INTERVAL_MINUTES=0 claude
+
+# Combine both
+GAUNTLET_STOP_HOOK_ENABLED=true GAUNTLET_STOP_HOOK_INTERVAL_MINUTES=5 claude
 ```
 
 ## Check gates: `.gauntlet/checks/*.yml`

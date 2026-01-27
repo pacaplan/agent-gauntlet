@@ -14,8 +14,9 @@ describe("Global Configuration", () => {
 			// loadGlobalConfig reads from user's actual global config if it exists
 			// We just verify the structure is valid, not the specific default value
 			const config = await loadGlobalConfig();
+			expect(typeof config.stop_hook.enabled).toBe("boolean");
 			expect(typeof config.stop_hook.run_interval_minutes).toBe("number");
-			expect(config.stop_hook.run_interval_minutes).toBeGreaterThan(0);
+			expect(config.stop_hook.run_interval_minutes).toBeGreaterThanOrEqual(0);
 		});
 
 		it("should have correct default values", async () => {
@@ -25,6 +26,7 @@ describe("Global Configuration", () => {
 			// Test the DEFAULT_GLOBAL_CONFIG constant directly to verify defaults
 			// This avoids interference from user's actual global config file
 			expect(DEFAULT_GLOBAL_CONFIG.stop_hook).toBeDefined();
+			expect(DEFAULT_GLOBAL_CONFIG.stop_hook.enabled).toBe(true);
 			expect(DEFAULT_GLOBAL_CONFIG.stop_hook.run_interval_minutes).toBe(10);
 		});
 	});
