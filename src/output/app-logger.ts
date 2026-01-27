@@ -35,7 +35,7 @@ export interface AppLoggerConfig {
 	};
 }
 
-// Global state for cleanup
+// Global state for cleanup (file descriptor for debug log, configuration flag)
 let debugLogFd: number | null = null;
 let isConfigured = false;
 
@@ -124,6 +124,9 @@ export async function initLogger(config: AppLoggerConfig): Promise<void> {
 	}
 
 	// Configure LogTape (reset: true needed if LogTape was previously configured)
+	// IMPORTANT: Configure the meta logger to suppress its default stdout output.
+	// Without this, LogTape writes "LogTape loggers are configured..." to stdout,
+	// which breaks the stop-hook JSON protocol.
 	await configure({
 		sinks,
 		loggers: [
@@ -131,6 +134,12 @@ export async function initLogger(config: AppLoggerConfig): Promise<void> {
 				category: ["gauntlet"],
 				lowestLevel: level,
 				sinks: activeSinks,
+			},
+			{
+				// Suppress LogTape's internal meta logger (writes to stdout by default)
+				category: ["logtape", "meta"],
+				lowestLevel: "fatal",
+				sinks: [],
 			},
 		],
 		reset: true,
@@ -153,7 +162,18 @@ export async function resetLogger(): Promise<void> {
 	}
 
 	// Reset LogTape configuration (reset: true required after initial configure)
-	await configure({ sinks: {}, loggers: [], reset: true });
+	// Also suppress meta logger to avoid stdout pollution
+	await configure({
+		sinks: {},
+		loggers: [
+			{
+				category: ["logtape", "meta"],
+				lowestLevel: "fatal",
+				sinks: [],
+			},
+		],
+		reset: true,
+	});
 	isConfigured = false;
 }
 

@@ -30,6 +30,8 @@ export interface RunResult {
 	consoleLogPath?: string;
 	/** Error message if status is "error" */
 	errorMessage?: string;
+	/** Interval minutes (when status is "interval_not_elapsed") */
+	intervalMinutes?: number;
 }
 
 /**
