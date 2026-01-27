@@ -379,9 +379,10 @@ export function registerStopHookCommand(program: Command): void {
 				// 3. Check marker file - fast exit for nested stop-hooks
 				// This catches child Claude processes whose stop hooks fire during gauntlet
 				// (Claude Code doesn't pass env vars to hooks, so we use a file-based signal)
+				const markerLogDir = await getLogDir(process.cwd());
 				const markerPath = path.join(
 					process.cwd(),
-					DEFAULT_LOG_DIR,
+					markerLogDir,
 					STOP_HOOK_MARKER_FILE,
 				);
 				if (await fileExists(markerPath)) {
@@ -509,9 +510,13 @@ export function registerStopHookCommand(program: Command): void {
 					intervalMinutes: result.intervalMinutes,
 				});
 
-				// Clean up logger
+				// Clean up logger (do not let cleanup errors break protocol)
 				if (loggerInitialized) {
-					await resetLogger();
+					try {
+						await resetLogger();
+					} catch {
+						// Ignore cleanup errors
+					}
 				}
 			} catch (error: unknown) {
 				// On any unexpected error, allow stop to avoid blocking indefinitely
@@ -530,9 +535,13 @@ export function registerStopHookCommand(program: Command): void {
 					}
 				}
 
-				// Clean up logger
+				// Clean up logger (do not let cleanup errors break protocol)
 				if (loggerInitialized) {
-					await resetLogger();
+					try {
+						await resetLogger();
+					} catch {
+						// Ignore cleanup errors
+					}
 				}
 			}
 		});

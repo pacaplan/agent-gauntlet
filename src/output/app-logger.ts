@@ -127,25 +127,37 @@ export async function initLogger(config: AppLoggerConfig): Promise<void> {
 	// IMPORTANT: Configure the meta logger to suppress its default stdout output.
 	// Without this, LogTape writes "LogTape loggers are configured..." to stdout,
 	// which breaks the stop-hook JSON protocol.
-	await configure({
-		sinks,
-		loggers: [
-			{
-				category: ["gauntlet"],
-				lowestLevel: level,
-				sinks: activeSinks,
-			},
-			{
-				// Suppress LogTape's internal meta logger (writes to stdout by default)
-				category: ["logtape", "meta"],
-				lowestLevel: "fatal",
-				sinks: [],
-			},
-		],
-		reset: true,
-	});
-
-	isConfigured = true;
+	try {
+		await configure({
+			sinks,
+			loggers: [
+				{
+					category: ["gauntlet"],
+					lowestLevel: level,
+					sinks: activeSinks,
+				},
+				{
+					// Suppress LogTape's internal meta logger (writes to stdout by default)
+					category: ["logtape", "meta"],
+					lowestLevel: "fatal",
+					sinks: [],
+				},
+			],
+			reset: true,
+		});
+		isConfigured = true;
+	} catch (error) {
+		// Close debug log fd if initialization fails to prevent leaks
+		if (debugLogFd !== null) {
+			try {
+				fs.closeSync(debugLogFd);
+			} catch {
+				// Ignore close errors
+			}
+			debugLogFd = null;
+		}
+		throw error;
+	}
 }
 
 /**

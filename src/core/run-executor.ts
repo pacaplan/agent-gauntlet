@@ -305,6 +305,10 @@ export async function executeRun(
 		// Try to acquire lock (non-exiting version)
 		lockAcquired = await tryAcquireLock(config.project.log_dir);
 		if (!lockAcquired) {
+			// Clean up logger if we initialized it
+			if (loggerInitializedHere) {
+				await resetLogger();
+			}
 			return {
 				status: "lock_conflict",
 				message: getStatusMessage("lock_conflict"),

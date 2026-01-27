@@ -67,12 +67,13 @@ wt list
 ### Creating Changesets
 Include a changeset in your feature PR (or add separately before merging):
 
-**Option A: Interactive CLI**
+#### Option A: Interactive CLI
+
 ```bash
 bun changeset
 ```
 
-**Option B: Manual file creation**
+#### Option B: Manual file creation
 Create `.changeset/<descriptive-name>.md`:
 ```markdown
 ---

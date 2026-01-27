@@ -41,11 +41,12 @@ export function parseStopHookEnvVars(): {
 		// Invalid values are ignored (fall through to next source)
 	}
 
-	// Parse interval (accepts non-negative integers)
+	// Parse interval (accepts non-negative integers only)
 	const intervalEnv = process.env[GAUNTLET_STOP_HOOK_INTERVAL_MINUTES];
 	if (intervalEnv !== undefined) {
-		const parsed = parseInt(intervalEnv, 10);
-		if (!Number.isNaN(parsed) && parsed >= 0) {
+		const normalized = intervalEnv.trim();
+		const parsed = Number(normalized);
+		if (normalized.length > 0 && Number.isInteger(parsed) && parsed >= 0) {
 			result.run_interval_minutes = parsed;
 		}
 		// Invalid values are ignored (fall through to next source)
