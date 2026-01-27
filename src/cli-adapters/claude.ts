@@ -3,6 +3,7 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
+import { GAUNTLET_STOP_HOOK_ACTIVE_ENV } from "../commands/stop-hook.js";
 import { type CLIAdapter, isUsageLimit } from "./index.js";
 
 const execAsync = promisify(exec);
@@ -167,6 +168,10 @@ export class ClaudeAdapter implements CLIAdapter {
 					.then(({ stream, handle }) => {
 						const child = spawn("claude", args, {
 							stdio: ["pipe", "pipe", "pipe"],
+							env: {
+								...process.env,
+								[GAUNTLET_STOP_HOOK_ACTIVE_ENV]: "1",
+							},
 						});
 
 						stream.pipe(child.stdin);
@@ -220,6 +225,10 @@ export class ClaudeAdapter implements CLIAdapter {
 			const { stdout } = await execAsync(cmd, {
 				timeout: opts.timeoutMs,
 				maxBuffer: MAX_BUFFER_BYTES,
+				env: {
+					...process.env,
+					[GAUNTLET_STOP_HOOK_ACTIVE_ENV]: "1",
+				},
 			});
 			return stdout;
 		} finally {

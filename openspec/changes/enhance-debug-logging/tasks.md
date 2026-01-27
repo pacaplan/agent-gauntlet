@@ -2,7 +2,7 @@
 
 ## 1. Implementation
 
-- [ ] 1.1 Create DiffStats Module
+- [x] 1.1 Create DiffStats Module
     Create new module to compute diff statistics (file counts, line counts, base ref).
 
     **Deliverables:**
@@ -16,7 +16,7 @@
 
     **Validation:** Unit tests for various diff scenarios
 
-- [ ] 1.2 Enhance RUN_START with Diff Stats
+- [x] 1.2 Enhance RUN_START with Diff Stats
     Add `logRunStartWithDiff()` method and integrate with run commands.
 
     **Deliverables:**
@@ -31,7 +31,7 @@
 
     **Validation:** Integration test: run command produces RUN_START with all diff fields
 
-- [ ] 1.3 Unify Console Log Numbering
+- [x] 1.3 Unify Console Log Numbering
     Modify `startConsoleLog` to accept run number from Logger instead of computing independently.
 
     **Deliverables:**
@@ -46,7 +46,7 @@
 
 ## 2. Tests
 
-- [ ] 2.1 Update Debug Log Tests
+- [x] 2.1 Update Debug Log Tests
     Update existing tests and add new tests for new logging methods.
 
     **Test cases:**
@@ -59,7 +59,7 @@
 
     **Dependencies:** Task 1.2
 
-- [ ] 2.2 Add DiffStats Tests
+- [x] 2.2 Add DiffStats Tests
     Add unit tests for diff stats computation.
 
     **Test cases:**
@@ -74,7 +74,7 @@
 
     **Dependencies:** Task 1.1
 
-- [ ] 2.3 Update Console Log Tests
+- [x] 2.3 Update Console Log Tests
     Update tests for new `startConsoleLog` signature.
 
     **Test cases:**
@@ -87,7 +87,7 @@
 
 ## 3. Documentation
 
-- [ ] 3.1 Update Stop-Hook Guide
+- [x] 3.1 Update Stop-Hook Guide
     Add troubleshooting section explaining debug logging.
 
     **Deliverables:**

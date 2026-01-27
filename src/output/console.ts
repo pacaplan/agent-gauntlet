@@ -5,21 +5,11 @@ import type { GateResult } from "../gates/result.js";
 import { reconstructHistory } from "../utils/log-parser.js";
 
 export class ConsoleReporter {
-	private silent: boolean;
-
-	constructor(silent = false) {
-		this.silent = silent;
-	}
-
 	onJobStart(job: Job) {
-		if (!this.silent) {
-			console.log(chalk.blue(`[START] ${job.id}`));
-		}
+		console.log(chalk.blue(`[START] ${job.id}`));
 	}
 
 	onJobComplete(job: Job, result: GateResult) {
-		if (this.silent) return;
-
 		const duration = `${(result.duration / 1000).toFixed(2)}s`;
 
 		const message = result.message ?? "";
@@ -92,8 +82,6 @@ export class ConsoleReporter {
 		logDir?: string,
 		statusOverride?: string,
 	) {
-		if (this.silent) return;
-
 		console.log(
 			`\n${chalk.bold("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")}`,
 		);

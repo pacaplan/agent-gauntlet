@@ -57,7 +57,8 @@ export class Runner {
 	) {}
 
 	async run(jobs: Job[]): Promise<RunnerOutcome> {
-		await this.logger.init();
+		// Note: logger.init() is called by the caller (run-executor, check, review)
+		// before startConsoleLog to ensure unified numbering
 
 		// Enforce retry limit before executing gates
 		const maxRetries = this.config.project.max_retries ?? 3;

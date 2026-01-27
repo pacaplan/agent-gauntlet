@@ -116,6 +116,90 @@ To manually inspect logs:
 ls -t gauntlet_logs/console.*.log | head -1 | xargs cat
 ```
 
+## Troubleshooting with Debug Logs
+
+Debug logging provides detailed information about stop-hook decisions and gauntlet execution. Enable it to understand why a stop was allowed or blocked.
+
+### Enabling Debug Logging
+
+Add to your `.gauntlet/config.yml`:
+```yaml
+debug_log:
+  enabled: true
+  max_size_mb: 10
+```
+
+Or configure globally in `~/.config/agent-gauntlet/config.yml`:
+```yaml
+debug_log:
+  enabled: true
+  max_size_mb: 10
+```
+
+### Debug Log Location
+
+Debug logs are written to `{log_dir}/.debug.log`. View with:
+```bash
+cat gauntlet_logs/.debug.log
+```
+
+### STOP_HOOK Log Entry Format
+
+Each stop-hook decision is logged with:
+```
+[timestamp] STOP_HOOK decision=<allow|block> reason=<GauntletStatus>
+```
+
+Example entries:
+```
+[2026-01-26T10:00:00Z] STOP_HOOK decision=allow reason=passed
+[2026-01-26T10:01:00Z] STOP_HOOK decision=block reason=failed
+[2026-01-26T10:02:00Z] STOP_HOOK decision=allow reason=interval_not_elapsed
+```
+
+### GauntletStatus Values
+
+| Status | Decision | Description |
+|--------|----------|-------------|
+| `passed` | allow | All gates passed successfully |
+| `passed_with_warnings` | allow | Passed with some skipped issues |
+| `no_applicable_gates` | allow | No gates matched the changes |
+| `no_changes` | allow | No file changes detected |
+| `failed` | block | One or more gates failed |
+| `retry_limit_exceeded` | allow | Too many fix attempts; clean needed |
+| `lock_conflict` | allow | Another gauntlet is running |
+| `error` | allow | Unexpected error occurred |
+| `no_config` | allow | No `.gauntlet/config.yml` found |
+| `stop_hook_active` | allow | Recursive hook prevention triggered |
+| `interval_not_elapsed` | allow | Run interval not yet passed |
+| `invalid_input` | allow | Invalid input to stop-hook |
+
+### RUN_START with Diff Statistics
+
+When debug logging is enabled, run starts include diff statistics:
+```
+[timestamp] RUN_START mode=full base_ref=origin/main files_changed=5 files_new=2 files_modified=2 files_deleted=1 lines_added=150 lines_removed=30 gates=2
+```
+
+Fields:
+- `mode`: "full" for initial run, "verification" for re-run
+- `base_ref`: Reference used for diff (branch, commit SHA, "uncommitted")
+- `files_changed`: Total files affected
+- `files_new`/`files_modified`/`files_deleted`: File change breakdown
+- `lines_added`/`lines_removed`: Line change counts
+- `gates`: Number of gates to run
+
+### Example Debug Session
+
+```
+[2026-01-26T10:00:00Z] COMMAND stop-hook
+[2026-01-26T10:00:01Z] RUN_START mode=full base_ref=origin/main files_changed=3 files_new=1 files_modified=2 files_deleted=0 lines_added=50 lines_removed=10 gates=2
+[2026-01-26T10:00:05Z] GATE_RESULT check:src:lint status=pass duration=1.50s violations=0
+[2026-01-26T10:00:10Z] GATE_RESULT review:src:quality status=fail duration=3.20s violations=2
+[2026-01-26T10:00:10Z] RUN_END status=fail fixed=0 skipped=0 failed=2 iterations=1
+[2026-01-26T10:00:10Z] STOP_HOOK decision=block reason=failed
+```
+
 ## Troubleshooting
 
 ### Hook Not Running

@@ -18,6 +18,29 @@ function formatArgs(args: unknown[]): string {
 
 function openLogFileExclusive(
 	logDir: string,
+	runNum: number,
+): { fd: number; logPath: string } {
+	const logPath = path.join(logDir, `console.${runNum}.log`);
+	try {
+		const fd = fs.openSync(
+			logPath,
+			fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_EXCL,
+		);
+		return { fd, logPath };
+	} catch (e: unknown) {
+		const error = e as { code?: string };
+		if (error.code === "EEXIST") {
+			// If file exists, something is wrong with our numbering logic
+			// Log warning and try incrementing as fallback
+			console.error(`Warning: console.${runNum}.log already exists`);
+			return openLogFileFallback(logDir, runNum + 1);
+		}
+		throw e;
+	}
+}
+
+function openLogFileFallback(
+	logDir: string,
 	startNum: number,
 ): { fd: number; logPath: string } {
 	let runNum = startNum;
@@ -41,30 +64,24 @@ function openLogFileExclusive(
 	throw new Error("Failed to create console log file after 100 attempts");
 }
 
-async function getStartingRunNumber(logDir: string): Promise<number> {
-	try {
-		const files = await fsPromises.readdir(logDir);
-		let max = 0;
-		for (const file of files) {
-			if (!file.startsWith("console.") || !file.endsWith(".log")) {
-				continue;
-			}
-			const middle = file.slice("console.".length, file.length - ".log".length);
-			if (/^\d+$/.test(middle)) {
-				const n = parseInt(middle, 10);
-				if (n > max) max = n;
-			}
-		}
-		return max + 1;
-	} catch {
-		return 1;
-	}
+export interface ConsoleLogHandle {
+	/** Restore original console functions */
+	restore: () => void;
+	/** Write directly to the log file without terminal output */
+	writeToLogOnly: (text: string) => void;
 }
 
-export async function startConsoleLog(logDir: string): Promise<() => void> {
+/**
+ * Start console logging with unified run numbering.
+ * @param logDir The directory to write logs to
+ * @param runNumber The run number from Logger (ensures console.N.log matches check.N.log)
+ */
+export async function startConsoleLog(
+	logDir: string,
+	runNumber: number,
+): Promise<ConsoleLogHandle> {
 	await fsPromises.mkdir(logDir, { recursive: true });
-	const startNum = await getStartingRunNumber(logDir);
-	const { fd } = openLogFileExclusive(logDir, startNum);
+	const { fd } = openLogFileExclusive(logDir, runNumber);
 
 	try {
 		const originalLog = console.log;
@@ -124,20 +141,25 @@ export async function startConsoleLog(logDir: string): Promise<() => void> {
 			return originalStderrWrite(chunk, ...(args as []));
 		}) as typeof process.stderr.write;
 
-		return () => {
-			isClosed = true;
-			if (isBun) {
-				console.log = originalLog;
-				console.error = originalError;
-				console.warn = originalWarn;
-			}
-			process.stdout.write = originalStdoutWrite;
-			process.stderr.write = originalStderrWrite;
-			try {
-				fs.closeSync(fd);
-			} catch {
-				// Ignore close errors
-			}
+		return {
+			restore: () => {
+				isClosed = true;
+				if (isBun) {
+					console.log = originalLog;
+					console.error = originalError;
+					console.warn = originalWarn;
+				}
+				process.stdout.write = originalStdoutWrite;
+				process.stderr.write = originalStderrWrite;
+				try {
+					fs.closeSync(fd);
+				} catch {
+					// Ignore close errors
+				}
+			},
+			writeToLogOnly: (text: string) => {
+				writeToLog(text);
+			},
 		};
 	} catch (error) {
 		fs.closeSync(fd);

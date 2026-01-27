@@ -44,6 +44,13 @@ interface MinimalConfig {
 const STDIN_TIMEOUT_MS = 5000;
 
 /**
+ * Environment variable set by the gauntlet when spawning child Claude processes.
+ * When set, stop-hooks in child processes should allow stops immediately
+ * to avoid redundant lock checks and improve clarity in debug logs.
+ */
+export const GAUNTLET_STOP_HOOK_ACTIVE_ENV = "GAUNTLET_STOP_HOOK_ACTIVE";
+
+/**
  * Default log directory when config doesn't specify one.
  */
 const DEFAULT_LOG_DIR = "gauntlet_logs";
@@ -367,6 +374,16 @@ export function registerStopHookCommand(program: Command): void {
 					return;
 				}
 
+				// 2b. Check if this is a child Claude process spawned by the gauntlet
+				// (indicated by environment variable set in CLI adapters)
+				if (process.env[GAUNTLET_STOP_HOOK_ACTIVE_ENV]) {
+					verboseLog(
+						"Child Claude process detected (env var set), allowing stop",
+					);
+					outputHookResponse("stop_hook_active");
+					return;
+				}
+
 				// 3. Determine project directory (use hook-provided cwd if available)
 				const projectCwd = hookInput.cwd ?? process.cwd();
 
@@ -423,7 +440,7 @@ export function registerStopHookCommand(program: Command): void {
 
 				// 9. Run gauntlet using direct function invocation
 				verboseLog("Running gauntlet gates...");
-				const result = await executeRun({ silent: true, cwd: projectCwd });
+				const result = await executeRun({ cwd: projectCwd });
 
 				// 10. Handle results using unified GauntletStatus directly
 				verboseLog(`Gauntlet completed with status: ${result.status}`);

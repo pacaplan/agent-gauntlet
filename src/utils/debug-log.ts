@@ -1,6 +1,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import type { DebugLogConfig as GlobalDebugLogConfig } from "../config/global.js";
+import type { DiffStats } from "../core/diff-stats.js";
 
 const DEBUG_LOG_FILENAME = ".debug.log";
 const DEBUG_LOG_BACKUP_FILENAME = ".debug.log.1";
@@ -69,6 +70,29 @@ export class DebugLogger {
 		await this.write(
 			`RUN_START mode=${mode} changes=${changes} gates=${gates}`,
 		);
+	}
+
+	/**
+	 * Log the start of a run/check/review command with diff statistics.
+	 */
+	async logRunStartWithDiff(
+		mode: "full" | "verification",
+		diffStats: DiffStats,
+		gates: number,
+	): Promise<void> {
+		const parts = [
+			"RUN_START",
+			`mode=${mode}`,
+			`base_ref=${diffStats.baseRef}`,
+			`files_changed=${diffStats.total}`,
+			`files_new=${diffStats.newFiles}`,
+			`files_modified=${diffStats.modifiedFiles}`,
+			`files_deleted=${diffStats.deletedFiles}`,
+			`lines_added=${diffStats.linesAdded}`,
+			`lines_removed=${diffStats.linesRemoved}`,
+			`gates=${gates}`,
+		];
+		await this.write(parts.join(" "));
 	}
 
 	/**

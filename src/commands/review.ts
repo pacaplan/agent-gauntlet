@@ -7,7 +7,10 @@ import { EntryPointExpander } from "../core/entry-point.js";
 import { JobGenerator } from "../core/job.js";
 import { Runner } from "../core/runner.js";
 import { ConsoleReporter } from "../output/console.js";
-import { startConsoleLog } from "../output/console-log.js";
+import {
+	type ConsoleLogHandle,
+	startConsoleLog,
+} from "../output/console-log.js";
 import { Logger } from "../output/logger.js";
 import {
 	getDebugLogger,
@@ -50,7 +53,7 @@ export function registerReviewCommand(program: Command): void {
 		.action(async (options) => {
 			let config: Awaited<ReturnType<typeof loadConfig>> | undefined;
 			let lockAcquired = false;
-			let restoreConsole: (() => void) | undefined;
+			let restoreConsole: ConsoleLogHandle | undefined;
 			try {
 				config = await loadConfig();
 
@@ -106,7 +109,16 @@ export function registerReviewCommand(program: Command): void {
 				// Acquire lock BEFORE starting console log (prevents orphaned log files)
 				await acquireLock(config.project.log_dir);
 				lockAcquired = true;
-				restoreConsole = await startConsoleLog(config.project.log_dir);
+
+				// Initialize Logger early to get unified run number for console log
+				const logger = new Logger(config.project.log_dir);
+				await logger.init();
+				const runNumber = logger.getRunNumber();
+
+				restoreConsole = await startConsoleLog(
+					config.project.log_dir,
+					runNumber,
+				);
 
 				let failuresMap:
 					| Map<string, Map<string, PreviousViolation[]>>
@@ -214,7 +226,7 @@ export function registerReviewCommand(program: Command): void {
 					console.log(chalk.green("No changes detected."));
 					await writeExecutionState(config.project.log_dir);
 					await releaseLock(config.project.log_dir);
-					restoreConsole?.();
+					restoreConsole?.restore();
 					process.exit(0);
 				}
 
@@ -237,7 +249,7 @@ export function registerReviewCommand(program: Command): void {
 					console.log(chalk.yellow("No applicable reviews for these changes."));
 					await writeExecutionState(config.project.log_dir);
 					await releaseLock(config.project.log_dir);
-					restoreConsole?.();
+					restoreConsole?.restore();
 					process.exit(0);
 				}
 
@@ -247,7 +259,6 @@ export function registerReviewCommand(program: Command): void {
 				const runMode = isRerun ? "verification" : "full";
 				await debugLogger?.logRunStart(runMode, changes.length, jobs.length);
 
-				const logger = new Logger(config.project.log_dir);
 				const reporter = new ConsoleReporter();
 				const runner = new Runner(
 					config,
@@ -280,7 +291,7 @@ export function registerReviewCommand(program: Command): void {
 					await cleanLogs(config.project.log_dir);
 				}
 				await releaseLock(config.project.log_dir);
-				restoreConsole?.();
+				restoreConsole?.restore();
 				process.exit(success ? 0 : 1);
 			} catch (error: unknown) {
 				// Write execution state even on error (if lock was acquired)
@@ -294,7 +305,7 @@ export function registerReviewCommand(program: Command): void {
 				}
 				const err = error as { message?: string };
 				console.error(chalk.red("Error:"), err.message);
-				restoreConsole?.();
+				restoreConsole?.restore();
 				process.exit(1);
 			}
 		});

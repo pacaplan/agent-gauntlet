@@ -22,7 +22,6 @@ export function registerRunCommand(program: Command): void {
 				gate: options.gate,
 				commit: options.commit,
 				uncommitted: options.uncommitted,
-				silent: false,
 			});
 
 			process.exit(isSuccessStatus(result.status) ? 0 : 1);

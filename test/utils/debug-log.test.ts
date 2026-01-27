@@ -91,6 +91,95 @@ describe("DebugLogger", () => {
 			expect(content).toContain("RUN_START mode=full changes=5 gates=3");
 		});
 
+		it("writes RUN_START with diff stats - branch ref", async () => {
+			const logger = new DebugLogger(TEST_DIR, {
+				enabled: true,
+				maxSizeMb: 10,
+			});
+			await logger.logRunStartWithDiff("full", {
+				baseRef: "origin/main",
+				total: 10,
+				newFiles: 3,
+				modifiedFiles: 5,
+				deletedFiles: 2,
+				linesAdded: 150,
+				linesRemoved: 30,
+			}, 4);
+
+			const logPath = path.join(TEST_DIR, ".debug.log");
+			const content = await fs.readFile(logPath, "utf-8");
+			expect(content).toContain("RUN_START mode=full");
+			expect(content).toContain("base_ref=origin/main");
+			expect(content).toContain("files_changed=10");
+			expect(content).toContain("files_new=3");
+			expect(content).toContain("files_modified=5");
+			expect(content).toContain("files_deleted=2");
+			expect(content).toContain("lines_added=150");
+			expect(content).toContain("lines_removed=30");
+			expect(content).toContain("gates=4");
+		});
+
+		it("writes RUN_START with diff stats - commit SHA", async () => {
+			const logger = new DebugLogger(TEST_DIR, {
+				enabled: true,
+				maxSizeMb: 10,
+			});
+			await logger.logRunStartWithDiff("verification", {
+				baseRef: "abc123def456",
+				total: 2,
+				newFiles: 1,
+				modifiedFiles: 1,
+				deletedFiles: 0,
+				linesAdded: 25,
+				linesRemoved: 10,
+			}, 1);
+
+			const logPath = path.join(TEST_DIR, ".debug.log");
+			const content = await fs.readFile(logPath, "utf-8");
+			expect(content).toContain("mode=verification");
+			expect(content).toContain("base_ref=abc123def456");
+		});
+
+		it("writes RUN_START with diff stats - uncommitted", async () => {
+			const logger = new DebugLogger(TEST_DIR, {
+				enabled: true,
+				maxSizeMb: 10,
+			});
+			await logger.logRunStartWithDiff("full", {
+				baseRef: "uncommitted",
+				total: 1,
+				newFiles: 1,
+				modifiedFiles: 0,
+				deletedFiles: 0,
+				linesAdded: 50,
+				linesRemoved: 0,
+			}, 2);
+
+			const logPath = path.join(TEST_DIR, ".debug.log");
+			const content = await fs.readFile(logPath, "utf-8");
+			expect(content).toContain("base_ref=uncommitted");
+		});
+
+		it("writes RUN_START with diff stats - worktree ref", async () => {
+			const logger = new DebugLogger(TEST_DIR, {
+				enabled: true,
+				maxSizeMb: 10,
+			});
+			await logger.logRunStartWithDiff("verification", {
+				baseRef: "WORKTREE-abc123",
+				total: 3,
+				newFiles: 0,
+				modifiedFiles: 3,
+				deletedFiles: 0,
+				linesAdded: 20,
+				linesRemoved: 15,
+			}, 1);
+
+			const logPath = path.join(TEST_DIR, ".debug.log");
+			const content = await fs.readFile(logPath, "utf-8");
+			expect(content).toContain("base_ref=WORKTREE-abc123");
+		});
+
 		it("writes RUN_END entries", async () => {
 			const logger = new DebugLogger(TEST_DIR, {
 				enabled: true,

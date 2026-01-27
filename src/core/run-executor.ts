@@ -11,7 +11,10 @@ import {
 import { loadGlobalConfig } from "../config/global.js";
 import { loadConfig } from "../config/loader.js";
 import { ConsoleReporter } from "../output/console.js";
-import { startConsoleLog } from "../output/console-log.js";
+import {
+	type ConsoleLogHandle,
+	startConsoleLog,
+} from "../output/console-log.js";
 import { Logger } from "../output/logger.js";
 import type { GauntletStatus, RunResult } from "../types/gauntlet-status.js";
 import {
@@ -30,6 +33,7 @@ import {
 	type PreviousViolation,
 } from "../utils/log-parser.js";
 import { ChangeDetector } from "./change-detector.js";
+import { computeDiffStats } from "./diff-stats.js";
 import { EntryPointExpander } from "./entry-point.js";
 import { JobGenerator } from "./job.js";
 import { Runner } from "./runner.js";
@@ -41,8 +45,6 @@ export interface ExecuteRunOptions {
 	gate?: string;
 	commit?: string;
 	uncommitted?: boolean;
-	/** If true, suppress console output (for stop-hook) */
-	silent?: boolean;
 	/** Working directory for config loading (defaults to process.cwd()) */
 	cwd?: string;
 }
@@ -132,12 +134,10 @@ function getStatusMessage(status: GauntletStatus): string {
 }
 
 /**
- * Helper to conditionally log to console.
+ * Helper to log to console. Centralizes logging for easy modification.
  */
-function log(silent: boolean, ...args: unknown[]): void {
-	if (!silent) {
-		console.log(...args);
-	}
+function log(...args: unknown[]): void {
+	console.log(...args);
 }
 
 /**
@@ -147,10 +147,10 @@ function log(silent: boolean, ...args: unknown[]): void {
 export async function executeRun(
 	options: ExecuteRunOptions = {},
 ): Promise<RunResult> {
-	const { silent = false, cwd } = options;
+	const { cwd } = options;
 	let config: Awaited<ReturnType<typeof loadConfig>> | undefined;
 	let lockAcquired = false;
-	let restoreConsole: (() => void) | undefined;
+	let consoleLogHandle: ConsoleLogHandle | undefined;
 
 	try {
 		config = await loadConfig(cwd);
@@ -170,7 +170,6 @@ export async function executeRun(
 			options.gate ? `-g ${options.gate}` : "",
 			options.commit ? `-c ${options.commit}` : "",
 			options.uncommitted ? "-u" : "",
-			silent ? "--silent" : "",
 		].filter(Boolean);
 		await debugLogger?.logCommand("run", args);
 
@@ -194,10 +193,7 @@ export async function executeRun(
 				effectiveBaseBranch,
 			);
 			if (autoCleanResult.clean) {
-				log(
-					silent,
-					chalk.dim(`Auto-cleaning logs (${autoCleanResult.reason})...`),
-				);
+				log(chalk.dim(`Auto-cleaning logs (${autoCleanResult.reason})...`));
 				await debugLogger?.logClean(
 					"auto",
 					autoCleanResult.reason || "unknown",
@@ -215,7 +211,12 @@ export async function executeRun(
 			};
 		}
 
-		restoreConsole = await startConsoleLog(config.project.log_dir);
+		// Initialize Logger early to get unified run number for console log
+		const logger = new Logger(config.project.log_dir);
+		await logger.init();
+		const runNumber = logger.getRunNumber();
+
+		consoleLogHandle = await startConsoleLog(config.project.log_dir, runNumber);
 
 		let failuresMap: Map<string, Map<string, PreviousViolation[]>> | undefined;
 		let changeOptions:
@@ -226,7 +227,6 @@ export async function executeRun(
 
 		if (isRerun) {
 			log(
-				silent,
 				chalk.dim("Existing logs detected — running in verification mode..."),
 			);
 			const { failures: previousFailures, passedSlots } =
@@ -252,7 +252,6 @@ export async function executeRun(
 					0,
 				);
 				log(
-					silent,
 					chalk.yellow(
 						`Found ${previousFailures.length} gate(s) with ${totalViolations} previous violation(s)`,
 					),
@@ -272,7 +271,7 @@ export async function executeRun(
 					effectiveBaseBranch,
 				);
 				if (resolved.warning) {
-					log(silent, chalk.yellow(`Warning: ${resolved.warning}`));
+					log(chalk.yellow(`Warning: ${resolved.warning}`));
 				}
 				if (resolved.fixBase) {
 					changeOptions = { fixBase: resolved.fixBase };
@@ -299,14 +298,14 @@ export async function executeRun(
 		const expander = new EntryPointExpander();
 		const jobGen = new JobGenerator(config);
 
-		log(silent, chalk.dim("Detecting changes..."));
+		log(chalk.dim("Detecting changes..."));
 		const changes = await changeDetector.getChangedFiles();
 
 		if (changes.length === 0) {
-			log(silent, chalk.green("No changes detected."));
+			log(chalk.green("No changes detected."));
 			await writeExecutionState(config.project.log_dir);
 			await releaseLock(config.project.log_dir);
-			restoreConsole?.();
+			consoleLogHandle?.restore();
 			return {
 				status: "no_changes",
 				message: getStatusMessage("no_changes"),
@@ -314,7 +313,7 @@ export async function executeRun(
 			};
 		}
 
-		log(silent, chalk.dim(`Found ${changes.length} changed files.`));
+		log(chalk.dim(`Found ${changes.length} changed files.`));
 
 		const entryPoints = await expander.expand(
 			config.project.entry_points,
@@ -327,10 +326,10 @@ export async function executeRun(
 		}
 
 		if (jobs.length === 0) {
-			log(silent, chalk.yellow("No applicable gates for these changes."));
+			log(chalk.yellow("No applicable gates for these changes."));
 			await writeExecutionState(config.project.log_dir);
 			await releaseLock(config.project.log_dir);
-			restoreConsole?.();
+			consoleLogHandle?.restore();
 			return {
 				status: "no_applicable_gates",
 				message: getStatusMessage("no_applicable_gates"),
@@ -338,14 +337,20 @@ export async function executeRun(
 			};
 		}
 
-		log(silent, chalk.dim(`Running ${jobs.length} gates...`));
+		log(chalk.dim(`Running ${jobs.length} gates...`));
 
-		// Log run start
+		// Compute diff stats and log run start
 		const runMode = isRerun ? "verification" : "full";
-		await debugLogger?.logRunStart(runMode, changes.length, jobs.length);
+		const diffStats = await computeDiffStats(
+			effectiveBaseBranch,
+			changeOptions || {
+				commit: options.commit,
+				uncommitted: options.uncommitted,
+			},
+		);
+		await debugLogger?.logRunStartWithDiff(runMode, diffStats, jobs.length);
 
-		const logger = new Logger(config.project.log_dir);
-		const reporter = new ConsoleReporter(silent);
+		const reporter = new ConsoleReporter();
 		const runner = new Runner(
 			config,
 			logger,
@@ -392,7 +397,7 @@ export async function executeRun(
 		}
 
 		await releaseLock(config.project.log_dir);
-		restoreConsole?.();
+		consoleLogHandle?.restore();
 
 		return {
 			status,
@@ -411,7 +416,7 @@ export async function executeRun(
 			}
 			await releaseLock(config.project.log_dir);
 		}
-		restoreConsole?.();
+		consoleLogHandle?.restore();
 		const err = error as { message?: string };
 		const errorMessage = err.message || "unknown error";
 		return {
