@@ -11,6 +11,7 @@ function makeCheckConfig(
 		command: "bun test",
 		parallel: true,
 		run_locally: true,
+		run_in_ci: true,
 		...overrides,
 	};
 }
